@@ -891,6 +891,11 @@ DJ202.HotcueButton.prototype.connect = function() {
 DJ202.HotcueButton.prototype.unshift = function() {
   this.inKey = 'hotcue_' + this.number + '_activate';
   this.input = function(channel, control, value, status, group) {
+    if (!value && this.heldHotcueGroup) {
+      engine.setValue(this.heldHotcueGroup, this.inKey, 0);
+      this.heldHotcueGroup = null;
+      return;
+    }
     if (this.pad.mode === DJ202.PadMode.PITCHPLAY) {
       if (value > 0 && this.pad.pitchplayCue > 0) {
         var fileKey = engine.getValue(group, 'file_key');
@@ -905,37 +910,14 @@ DJ202.HotcueButton.prototype.unshift = function() {
                               'hotcue_' + this.pad.pitchplayCue + '_activate');
       }
     } else if (this.pad.mode === DJ202.PadMode.CUELOOP) {
-      if (engine.getValue(this.group, 'hotcue_' + this.number + '_enabled')) {
-        if (value) {
-          // jump to existing cue and loop
-          var startpos =
-              engine.getValue(group, "hotcue_" + this.number + "_position");
-          var loopseconds =
-              DJ202.cueLoopLength * (1 / (engine.getValue(group, "bpm") / 60));
-          var loopsamples =
-              loopseconds * engine.getValue(group, "track_samplerate") * 2;
-          var endpos = startpos + loopsamples;
-          // disable loop if currently enabled
-          if (engine.getValue(group, "loop_enabled")) {
-            engine.setValue(group, "reloop_toggle", 1);
-          }
-          // set start and endpoints
-          engine.setValue(group, "loop_start_position", startpos);
-          engine.setValue(group, "loop_end_position", endpos);
-          // enable loop
-          engine.setValue(group, "reloop_toggle", 1);
-          engine.setValue(group, "loop_in_goto", 1);
-        } else {
-          engine.setValue(group, "reloop_toggle", 1);
-        }
-      } else {
-        // set a new cue point and loop
-        engine.setValue(group, "hotcue_" + this.number + "_activate", 1);
-        engine.setValue(group, "hotcue_" + this.number + "_activate", 0);
-        engine.setValue(group, "beatloop_" + DJ202.cueLoopLength + "_activate",
-                        1);
+      if (value && engine.getValue(this.group, 'track_loaded')) {
+        engine.setValue(this.group, 'beatloop_size', DJ202.cueLoopLength);
+        script.triggerControl(this.group, 'hotcue_' + this.number + '_cueloop');
       }
     } else {
+      if (value) {
+        this.heldHotcueGroup = this.group;
+      }
       components.HotcueButton.prototype.input.apply(this, arguments);
     }
   }
@@ -943,17 +925,24 @@ DJ202.HotcueButton.prototype.unshift = function() {
 
 DJ202.HotcueButton.prototype.shift = function() {
   this.input = function(channel, control, value, status, group) {
+    if (!value && this.heldHotcueGroup) {
+      engine.setValue(this.heldHotcueGroup, 'hotcue_' + this.number + '_activate', 0);
+      this.heldHotcueGroup = null;
+      return;
+    }
+    if (!value) {
+      return;
+    }
     if (this.pad.mode === DJ202.PadMode.PITCHPLAY) {
       this.pad.pitchplayCue = this.number;
       this.pad.setHotcueLED(this.number);
+    } else if (this.pad.mode === DJ202.PadMode.CUELOOP) {
+      if (engine.getValue(this.group, 'track_loaded')) {
+        engine.setValue(this.group, 'beatloop_size', DJ202.cueLoopLength);
+        script.triggerControl(this.group, 'hotcue_' + this.number + '_gotoandloop');
+      }
     } else {
-      if (!value) {
-        return;
-      }
       script.triggerControl(this.group, 'hotcue_' + this.number + '_clear');
-      if (engine.getValue(this.group, 'play')) {
-        script.triggerControl(this.group, 'hotcue_' + this.number + '_set');
-      }
     }
   };
 };
@@ -1002,6 +991,15 @@ DJ202.ManualLoopButton.prototype.connect = function() {
   var deck = script.deckFromGroup(this.group);
   this.midi = [ 0x94 + deck - 1, this.cc ];
   components.Button.prototype.connect.call(this)
+};
+
+DJ202.ManualLoopButton.prototype.output = function(value) {
+  if (this.outKey === 'loop_start_position' || this.outKey === 'loop_end_position') {
+    // Positions are sample offsets (-1 means unset), not normalized LED values.
+    this.send(value >= 0 ? 0x7f : 0);
+  } else {
+    components.Button.prototype.output.apply(this, arguments);
+  }
 };
 
 DJ202.SlipModeButton.prototype = Object.create(components.Button.prototype);
@@ -1369,8 +1367,13 @@ DJ202.PadSection = function(deck) {
   });
   this.loopExit = this.loopButton[7] = new DJ202.ManualLoopButton({
     cc : 0x17,
-    inKey : 'reloop_andstop',
-    outKey : 'reloop_andstop',
+    inKey : 'loop_enabled',
+    outKey : 'loop_enabled',
+    input : function(channel, control, value) {
+      if (value) {
+        engine.setValue(this.group, 'loop_enabled', 0);
+      }
+    },
   });
   this.loopToggle = this.loopButton[8] = new DJ202.ManualLoopButton({
     cc : 0x18,

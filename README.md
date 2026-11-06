@@ -1,5 +1,14 @@
 # Roland DJ-202 para Mixxx
 
+## Pads y loops
+
+Se corrigió el borrado de hotcues durante reproducción, Cue Loop usa los
+controles nativos de Mixxx (toque alterna, Shift relanza), Loop Exit deja
+la pista reproduciendo y los LEDs de Loop In/Out envían valores MIDI válidos.
+El XML requiere ahora Mixxx 2.4+. Detalles y cambios de gestos en
+[GESTOS-CUSTOM.md](GESTOS-CUSTOM.md). `test-callbacks.cjs` cubre los cuatro decks;
+falta validación física de esta actualización. Respaldo previo: `b65448e`.
+
 Los gestos propios, su procedencia y sus diferencias respecto a Serato están
 documentados en [GESTOS-CUSTOM.md](GESTOS-CUSTOM.md). Incluye la nueva acción
 **Shift + mantener FX para quitar foco** y el enrutamiento por toque corto al soltar.

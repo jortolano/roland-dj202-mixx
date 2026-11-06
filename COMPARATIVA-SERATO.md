@@ -5,6 +5,11 @@ de temporizadores y conexiones de LEDs, el parpadeo FX y la limpieza de recursos
 Ver README y `test-callbacks.cjs`. Las filas siguientes conservan el diagnóstico
 del respaldo `04a0a21`; las asignaciones siguen siendo las mismas.
 
+Actualización pads/loops: borrado de hotcue sin recreación, Cue Loop nativo con
+alternancia y Shift para relanzar, salida del loop sin detener playback y LEDs
+de posiciones corregidos. Son cambios posteriores a la matriz histórica;
+su contrato actual está en GESTOS-CUSTOM.md.
+
 Revisión estática: 6 de noviembre de 2026. Respaldo anterior a esta comparación:
 **04a0a21**. Incluye la corrección de FX, pruebas y los dos manuales locales.
 Esta revisión no modifica las asignaciones ni el mapeo instalado.

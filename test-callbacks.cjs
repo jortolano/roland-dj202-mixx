@@ -8,12 +8,14 @@ const connections = new Set();
 const timers = new Map();
 const messages = [];
 const brakes = [];
+const writes = [];
 let nextTimer = 1;
 let now = 0;
 const key = (g, k) => `${g}:${k}`;
 const getValue = (g, k) => Number(values.get(key(g, k)) || 0);
 function setValue(g, k, v) {
   assert.equal(typeof g, 'string');
+  writes.push([g, k, v]);
   values.set(key(g, k), v);
   for (const c of [...connections]) {
     if (c.group === g && c.control === k) c.callback(v, g, k);
@@ -195,6 +197,55 @@ assert.ok(messages.some(m => m[0] === 0x91 && m[1] === 0x03));
 messages.length = 0;
 setValue(dj.effectUnit[2].button[2].effectGroup, 'enabled', 1);
 assert.ok(messages.some(m => m[0] === 0x99 && m[1] === 1 && m[2] === 127));
+
+// Pads on all four decks: deletion stays deletion; Cue Loop uses native controls.
+for (const deck of [1, 2, 3, 4]) {
+  const side = deck % 2 ? left : right;
+  const group = `[Channel${deck}]`;
+  side.setCurrentDeck(group);
+  const pads = side.padSection;
+  const cue = pads.hotcueButton[1];
+  setValue(group, 'track_loaded', 1);
+  setValue(group, 'play', 1);
+  pads.mode = dj.PadMode.HOTCUE;
+  cue.shift(); writes.length = 0;
+  press(cue, 127, group); press(cue, 0, group);
+  assert.deepEqual(writes, [[group, 'hotcue_1_clear', 1], [group, 'hotcue_1_clear', 0]]);
+
+  cue.unshift(); press(cue, 127, group);
+  cue.shift(); press(cue, 0, group);
+  assert.equal(getValue(group, 'hotcue_1_activate'), 0);
+  cue.unshift();
+  pads.mode = dj.PadMode.CUELOOP;
+  for (const exists of [0, 1]) {
+    setValue(group, 'hotcue_1_enabled', exists);
+    setValue(group, 'bpm', 0); // No manual division by BPM/sample rate.
+    writes.length = 0;
+    press(cue, 127, group); press(cue, 0, group);
+    assert.deepEqual(writes, [[group, 'beatloop_size', 2],
+      [group, 'hotcue_1_cueloop', 1], [group, 'hotcue_1_cueloop', 0]]);
+  }
+  cue.shift(); writes.length = 0;
+  press(cue, 127, group); cue.unshift(); press(cue, 0, group);
+  assert.deepEqual(writes, [[group, 'beatloop_size', 2],
+    [group, 'hotcue_1_gotoandloop', 1], [group, 'hotcue_1_gotoandloop', 0]]);
+
+  setValue(group, 'track_loaded', 0); writes.length = 0;
+  press(cue, 127, group); press(cue, 0, group);
+  assert.equal(writes.length, 0);
+  setValue(group, 'loop_enabled', 1); writes.length = 0;
+  press(pads.loopExit, 127, group); press(pads.loopExit, 0, group);
+  assert.deepEqual(writes, [[group, 'loop_enabled', 0]]);
+  assert.equal(getValue(group, 'play'), 1);
+
+  messages.length = 0;
+  setValue(group, 'loop_start_position', 44100);
+  setValue(group, 'loop_end_position', -1);
+  assert.ok(messages.some(m => m[1] === 0x15 && m[2] === 127));
+  assert.ok(messages.some(m => m[1] === 0x16 && m[2] === 0));
+}
+left.setCurrentDeck('[Channel1]');
+right.setCurrentDeck('[Channel2]');
 
 // No mapping-owned callbacks survive shutdown, including active FX flashing.
 fx.flash();

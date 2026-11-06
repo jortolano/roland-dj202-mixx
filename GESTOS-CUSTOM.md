@@ -50,6 +50,35 @@ El umbral es configurable en la biblioteca y no debe asumirse idéntico en
 otras versiones de Mixxx. El tap tempo de efectos sigue pendiente; no se añadió
 una asignación nueva al botón FX Mode/Tap.
 
+## Pads y loops: correcciones posteriores
+
+| Modo / gesto | Comportamiento actual | Procedencia |
+|---|---|---|
+| Hotcue + Shift + pad | Borrar el cue, también mientras reproduce; no recrearlo | Corrección para coincidir con el borrado documentado |
+| Cue Loop + pad | Alternar bucle desde el cue; si está vacío, crear cue y bucle | Control nativo `hotcue_X_cueloop` de Mixxx 2.4+ |
+| Cue Loop + Shift + pad | Relanzar desde un cue existente y reproducir en bucle | Control nativo `hotcue_X_gotoandloop`; no borra el cue |
+| Pad Loop Exit (7) | Desactivar el loop sin detener reproducción ni mover la pista | Corrección del anterior `reloop_andstop` |
+
+Cue Loop ya no es momentáneo: soltar el pad no sale del bucle; otro toque
+lo alterna. Se usa `cueLoopLength=2` para cues normales. Los loops guardados
+usan su propia duración, gestionada por Mixxx. Shift sobre un pad vacío en Cue
+Loop no crea uno: necesita un cue existente para relanzar. Sin pista cargada
+no se envía ninguna acción de Cue Loop.
+
+Esta adaptación sustituye cálculo manual de muestras y BPM por controles del
+programa, que también definen cómo operar sin beatgrid. La escritura de la
+duración seleccionada de loop a dos beats es una decisión propia del mapeo.
+Requiere Mixxx 2.4 o posterior, indicado ahora en el XML.
+
+Los LEDs de Loop In/Out se convierten a valores MIDI 0/127 a partir de si existe
+una posición de loop; antes se enviaban posiciones en muestras como intensidad.
+Si se pulsa un hotcue normal y después Shift, soltar el pad libera la activación
+original: evita dejar una preescucha retenida por un cambio de modificador.
+
+Referencia técnica: [controles de Mixxx 2.5](https://manual.mixxx.org/2.5/en/chapters/appendix/mixxx_controls).
+Las pruebas verifican las órdenes y LEDs en los cuatro decks con motor simulado;
+el comportamiento de audio y la confirmación física siguen pendientes.
+
 ## Otras diferencias ya existentes
 
 No se modifican en esta actualización. Son decisiones heredadas o adaptaciones
