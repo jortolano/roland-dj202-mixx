@@ -76,6 +76,9 @@ DJ202.init = function() {
     engine.setValue('[Master]', 'headMix', -1);
   }
   DJ202.shiftButton = function(channel, control, value, status, group) {
+    if (value) {
+      DJ202.deck.forEach(function(deck) { deck.releaseScratch(); });
+    }
     DJ202.deck.concat(DJ202.effectUnit, DJ202.sampler)
         .forEach(value ? function(module) { module.shift(); }
                        : function(module) { module.unshift(); });
@@ -99,7 +102,13 @@ DJ202.init = function() {
   DJ202.makeConnection('[Channel3]', 'track_loaded', DJ202.autoShowDecks);
   DJ202.makeConnection('[Channel4]', 'track_loaded', DJ202.autoShowDecks);
   for (var deck = 1; deck <= 4; deck++) {
-    DJ202.makeConnection('[Channel' + deck + ']', 'track_loaded', DJ202.pitchPlayTrackChanged);
+    DJ202.makeConnection('[Channel' + deck + ']', 'track_loaded', function(value, group) {
+      DJ202.pitchPlayTrackChanged(value, group);
+      var side = script.deckFromGroup(group) % 2 ? DJ202.leftDeck : DJ202.rightDeck;
+      if (!value && side.currentDeck === group) {
+        side.releaseScratch();
+      }
+    });
   }
 
   DJ202.leftDeck.setCurrentDeck('[Channel1]');
@@ -176,7 +185,6 @@ DJ202.crossfader = new components.Pot({
 
 DJ202.Deck = function(deckNumbers, offset) {
   components.Deck.call(this, deckNumbers);
-  channel = offset + 1;
 
   this.loadTrack = new components.Button({
     midi : [ 0x9F, 0x02 + offset ],
@@ -186,21 +194,22 @@ DJ202.Deck = function(deckNumbers, offset) {
 
   this.slipModeButton = new DJ202.SlipModeButton();
 
-  engine.setValue(this.currentDeck, "rate_dir", -1);
   this.tempoFader = new components.Pot({
     midi : [ 0xB0 + offset, 0x09 ],
     connect : function() {
-      engine.softTakeover(this.group, 'pitch', true);
+      engine.softTakeover(this.group, 'pitch_adjust', true);
       engine.softTakeover(this.group, 'rate', true);
       components.Pot.prototype.connect.apply(this, arguments);
     },
     unshift : function() {
       this.inKey = 'rate';
       this.inSetParameter = components.Pot.prototype.inSetParameter;
-      engine.softTakeoverIgnoreNextValue(this.group, 'pitch');
+      if (this.group) {
+        engine.softTakeoverIgnoreNextValue(this.group, 'rate');
+      }
     },
     shift : function() {
-      this.inKey = 'pitch';
+      this.inKey = 'pitch_adjust';
       this.inSetParameter = function(value) {
         // Scale to interval ]-7…7[; invert direction as per controller
         // labeling.
@@ -208,29 +217,44 @@ DJ202.Deck = function(deckNumbers, offset) {
         value *= -1;
         components.Pot.prototype.inSetValue.call(this, value);
       };
-      engine.softTakeoverIgnoreNextValue(this.group, 'rate');
+      if (this.group) {
+        engine.softTakeoverIgnoreNextValue(this.group, 'pitch_adjust');
+      }
     }
   });
 
   // ============================= JOG WHEELS =================================
 
   this.wheelTouch = function(channel, control, value, status, group) {
-    if (value === 0x7F && !this.isShifted) {
+    if (group && group !== this.currentDeck) {
+      return;
+    }
+    if (value && !this.isShifted && engine.getValue(this.currentDeck, 'track_loaded')) {
       var alpha = 1.0 / 8;
       var beta = alpha / 32;
-      engine.scratchEnable(script.deckFromGroup(this.currentDeck), 512, 45,
+      this.scratchDeck = script.deckFromGroup(this.currentDeck);
+      engine.scratchEnable(this.scratchDeck, 512, 45,
                            alpha, beta);
     } else { // If button up
-      engine.scratchDisable(script.deckFromGroup(this.currentDeck));
+      this.releaseScratch();
     }
   };
 
   this.wheelTurn = function(channel, control, value, status, group) {
+    if (group && group !== this.currentDeck) {
+      return;
+    }
+    if (!engine.getValue(this.currentDeck, 'track_loaded')) {
+      this.releaseScratch();
+      return;
+    }
     var newValue = value - 64;
+    if (newValue === 0) {
+      return;
+    }
     var deck = script.deckFromGroup(this.currentDeck);
-    if (engine.isScratching(deck)) {
-      engine.scratchTick(deck, newValue); // Scratch!
-    } else if (this.isShifted) {
+    if (this.isShifted) {
+      this.releaseScratch();
       // Strip search.
       var oldPos = engine.getValue(this.currentDeck, 'playposition');
       // Scale to interval [0,1].
@@ -239,9 +263,14 @@ DJ202.Deck = function(deckNumbers, offset) {
       // song duration in order for the jog wheel to cover the same amount
       // of time given a constant turning angle.
       var duration = engine.getValue(this.currentDeck, 'duration');
+      if (!isFinite(duration) || duration <= 0 || !isFinite(oldPos)) {
+        return;
+      }
       newValue = newValue / duration;
-      var newPos = Math.max(0, oldPos + newValue * DJ202.stripSearchScaling);
+      var newPos = Math.max(0, Math.min(1, oldPos + newValue * DJ202.stripSearchScaling));
       engine.setValue(this.currentDeck, 'playposition', newPos);
+    } else if (this.scratchDeck === deck && engine.isScratching(deck)) {
+      engine.scratchTick(deck, newValue); // Scratch!
     } else {
       engine.setValue(this.currentDeck, 'jog', newValue); // Pitch bend
     }
@@ -430,10 +459,22 @@ DJ202.Deck = function(deckNumbers, offset) {
 
   this.setCurrentDeck = function(deck) {
     if (this.currentDeck && this.currentDeck !== deck) {
+      this.releaseScratch();
       DJ202.stopSlicer(this.currentDeck);
       DJ202.stopPitchPlay(this.currentDeck);
     }
     components.Deck.prototype.setCurrentDeck.call(this, deck);
+    engine.setValue(deck, 'rate_dir', -1);
+    this.forEachComponent(function(component) {
+      if (component instanceof components.Pot) {
+        delete component.MSB;
+        delete component._firstLSB;
+        if (component.group && component.inKey && component.softTakeover) {
+          engine.softTakeover(component.group, component.inKey, true);
+          engine.softTakeoverIgnoreNextValue(component.group, component.inKey);
+        }
+      }
+    });
     DJ202.effectUnit[offset + 1].focusedDeck = script.deckFromGroup(deck);
     DJ202.effectUnit[offset + 1].reconnect();
     DJ202.connectSlicer(deck, this.padSection.mode);
@@ -442,6 +483,13 @@ DJ202.Deck = function(deckNumbers, offset) {
 };
 
 DJ202.Deck.prototype = Object.create(components.Deck.prototype);
+
+DJ202.Deck.prototype.releaseScratch = function() {
+  if (this.scratchDeck !== undefined && this.scratchDeck !== null) {
+    engine.scratchDisable(this.scratchDeck);
+    this.scratchDeck = null;
+  }
+};
 
 ///////////////////////////////////////////////////////////////
 //                             FX                            //
@@ -1151,11 +1199,10 @@ DJ202.KeylockButton.prototype.shift = function() {
   this.input = function(channel, control, value, status, group) {
     if (this.isPress(channel, control, value, status)) {
       this.send(0x7f);
-      this.currentRangeIndex++;
-      if (this.currentRangeIndex >= DJ202.tempoRange.length) {
-        this.currentRangeIndex = 0;
-      }
+      var range = engine.getValue(this.group, 'rateRange');
+      this.currentRangeIndex = (DJ202.tempoRange.indexOf(range) + 1) % DJ202.tempoRange.length;
       this.inSetValue(DJ202.tempoRange[this.currentRangeIndex]);
+      engine.softTakeoverIgnoreNextValue(this.group, 'rate');
       return;
     }
     this.send(0);

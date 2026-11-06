@@ -27,6 +27,11 @@ hardware; mezcla física de MIXING pendiente de prueba auditiva. El Tap FX
 independiente sigue pendiente, no se sustituyó por cambios de BPM/velocidad del
 deck. Ver AUDIO-Y-SECCION-CENTRAL.md.
 
+Actualización jogs/tempo: límites de búsqueda, liberación de scratch con Shift
+y cambio de deck, dirección en 3/4, transposición mediante `pitch_adjust` y
+rearme de toma suave/lecturas de 14 bits. Shift + tempo conserva su función
+propia de transposición, no adopta el clutch de Serato. Ver GESTOS-CUSTOM.md.
+
 Revisión estática: 6 de noviembre de 2026. Respaldo anterior a esta comparación:
 **04a0a21**. Incluye la corrección de FX, pruebas y los dos manuales locales.
 Esta revisión no modifica las asignaciones ni el mapeo instalado.

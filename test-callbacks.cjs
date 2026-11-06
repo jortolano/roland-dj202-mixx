@@ -9,6 +9,10 @@ const timers = new Map();
 const messages = [];
 const brakes = [];
 const writes = [];
+const takeoverRequests = [];
+const ignoreRequests = [];
+const scratching = new Set();
+const scratchEvents = [];
 let nextTimer = 1;
 let now = 0;
 const key = (g, k) => `${g}:${k}`;
@@ -52,7 +56,8 @@ function advance(ms) {
 }
 const engine = {
   getValue, setValue, getParameter: getValue, setParameter: setValue,
-  softTakeover() {}, softTakeoverIgnoreNextValue() {},
+  softTakeover(...args) { takeoverRequests.push(args); },
+  softTakeoverIgnoreNextValue(...args) { ignoreRequests.push(args); },
   beginTimer(interval, callback, once) {
     assert.ok(Number.isFinite(interval) && interval > 0);
     const id = nextTimer++;
@@ -68,7 +73,10 @@ const engine = {
       disconnect() { connections.delete(c); }
     };
   },
-  scratchDisable() {}, isScratching() { return false; },
+  scratchEnable(deck, ...args) { scratching.add(deck); scratchEvents.push(['enable', deck, ...args]); },
+  scratchDisable(deck) { scratching.delete(deck); scratchEvents.push(['disable', deck]); },
+  scratchTick(deck, amount) { scratchEvents.push(['tick', deck, amount]); },
+  isScratching(deck) { return scratching.has(deck); },
   brake(...args) { brakes.push(args); }, softStart(...args) { brakes.push(args); }
 };
 const context = vm.createContext({
@@ -499,6 +507,111 @@ for (const deck of [1, 2, 3, 4]) {
   assert.equal(state.range, 1);
   assert.equal(getValue(group, 'pitch_adjust'), 0);
   pads.setState(0, 0, 0, 0, group);
+}
+left.setCurrentDeck('[Channel1]');
+right.setCurrentDeck('[Channel2]');
+
+// Jog gestures and tempo use the actual 14-bit handlers on all four decks.
+const send14 = (pot, value, group) => {
+  pot.inputMSB(0, 0, value >> 7, 0xb0, group);
+  pot.inputLSB(0, 0, value & 127, 0xb0, group);
+};
+for (const deck of [1, 2, 3, 4]) {
+  const side = deck % 2 ? left : right;
+  const group = `[Channel${deck}]`;
+  side.setCurrentDeck(group);
+  setValue(group, 'track_loaded', 1);
+  setValue(group, 'duration', 100);
+  assert.equal(getValue(group, 'rate_dir'), -1);
+
+  scratchEvents.length = 0;
+  side.wheelTouch(0, 6, 127, 0x90, group);
+  assert.equal(scratching.has(deck), true);
+  side.wheelTurn(0, 6, 65, 0xb0, group);
+  side.wheelTurn(0, 6, 63, 0xb0, group);
+  assert.ok(scratchEvents.some(e => e[0] === 'tick' && e[1] === deck && e[2] === 1));
+  assert.ok(scratchEvents.some(e => e[0] === 'tick' && e[1] === deck && e[2] === -1));
+  side.wheelTouch(0, 6, 0, 0x90, group);
+  assert.equal(scratching.has(deck), false);
+  side.wheelTurn(0, 6, 65, 0xb0, group);
+  assert.equal(getValue(group, 'jog'), 1);
+  writes.length = 0;
+  side.wheelTurn(0, 6, 64, 0xb0, group);
+  assert.equal(writes.length, 0);
+
+  side.wheelTouch(0, 6, 127, 0x90, group);
+  dj.shiftButton(0, 0, 127, 0, '');
+  assert.equal(scratching.has(deck), false);
+  setValue(group, 'playposition', 0.99);
+  side.wheelTurn(0, 6, 127, 0xb0, group);
+  assert.equal(getValue(group, 'playposition'), 1);
+  setValue(group, 'playposition', 0.01);
+  side.wheelTurn(0, 6, 0, 0xb0, group);
+  assert.equal(getValue(group, 'playposition'), 0);
+  for (const duration of [0, Infinity]) {
+    setValue(group, 'duration', duration); writes.length = 0;
+    side.wheelTurn(0, 6, 65, 0xb0, group);
+    assert.equal(writes.length, 0);
+  }
+  setValue(group, 'duration', 100);
+  dj.shiftButton(0, 0, 0, 0, '');
+  assert.equal(scratching.has(deck), false); // Lift and touch again to resume scratch.
+  side.wheelTouch(0, 6, 0, 0x90, group);
+
+  side.wheelTouch(0, 6, 127, 0x90, group);
+  side.setCurrentDeck(`[Channel${deck <= 2 ? deck + 2 : deck - 2}]`);
+  assert.equal(scratching.has(deck), false);
+  writes.length = 0; scratchEvents.length = 0;
+  side.wheelTurn(0, 6, 65, 0xb0, group); // Late packets from the previous deck.
+  side.wheelTouch(0, 6, 127, 0x90, group);
+  assert.equal(writes.length, 0);
+  assert.equal(scratchEvents.length, 0);
+  side.setCurrentDeck(group);
+  side.wheelTouch(0, 6, 127, 0x90, group);
+  setValue(group, 'track_loaded', 0);
+  assert.equal(scratching.has(deck), false);
+  writes.length = 0;
+  side.wheelTurn(0, 6, 65, 0xb0, group);
+  side.wheelTouch(0, 6, 127, 0x90, group);
+  assert.equal(writes.length, 0);
+  assert.equal(scratching.has(deck), false);
+  setValue(group, 'track_loaded', 1);
+
+  const tempo = side.tempoFader;
+  assert.ok(takeoverRequests.some(r => r[0] === group && r[1] === 'rate' && r[2]));
+  assert.ok(ignoreRequests.some(r => r[0] === group && r[1] === 'rate'));
+  for (const [raw, expected] of [[0, 0], [8192, 0.5], [16383, 1]]) {
+    send14(tempo, raw, group);
+    assert.equal(getValue(group, 'rate'), expected); // Host records normalized parameters.
+  }
+  dj.shiftButton(0, 0, 127, 0, '');
+  assert.equal(tempo.inKey, 'pitch_adjust');
+  for (const [raw, expected] of [[0, 7], [8192, 0], [16383, -7]]) {
+    writes.length = 0;
+    send14(tempo, raw, group);
+    assert.equal(getValue(group, 'pitch_adjust'), expected);
+    assert.ok(writes.every(w => w[1] !== 'pitch' && w[1] !== 'rate'));
+  }
+  setValue(group, 'rateRange', 0.5);
+  for (const expected of [0.08, 0.16, 0.5]) {
+    press(side.keylock, 127, group); press(side.keylock, 0, group);
+    assert.equal(getValue(group, 'rateRange'), expected);
+  }
+  dj.shiftButton(0, 0, 0, 0, '');
+  assert.equal(tempo.inKey, 'rate');
+
+  // Switching away and back invalidates old MSB/LSB and arms the new target's pickup.
+  send14(side.volume, 16383, group);
+  side.setCurrentDeck(`[Channel${deck <= 2 ? deck + 2 : deck - 2}]`);
+  side.setCurrentDeck(group);
+  assert.equal(tempo.MSB, undefined);
+  assert.equal(side.volume.MSB, undefined);
+  assert.ok(ignoreRequests.some(r => r[0] === group && r[1] === 'volume'));
+  writes.length = 0;
+  tempo.inputLSB(0, 0, 0, 0xb0, group);
+  assert.equal(writes.length, 0);
+  tempo.inputMSB(0, 0, 32, 0xb0, group);
+  assert.equal(getValue(group, 'rate'), 0.25);
 }
 left.setCurrentDeck('[Channel1]');
 right.setCurrentDeck('[Channel2]');

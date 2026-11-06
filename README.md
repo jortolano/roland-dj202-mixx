@@ -1,5 +1,15 @@
 # Roland DJ-202 para Mixxx
 
+## Jogs y tempo
+
+Scratch se libera con Shift, cambio de deck y descarga de pista. La búsqueda
+con Shift se limita a 0–100% y requiere duración válida. Shift + tempo usa
+`pitch_adjust`; dirección, rangos y toma suave se preparan para los cuatro decks.
+Se descartan bytes MIDI de 14 bits anteriores al cambiar de deck y se eliminó
+una entrada duplicada del fader derecho (355 entradas MIDI únicas actuales).
+Pruebas de script pasadas; falta prueba física de sensibilidad y toma suave.
+Detalles en [GESTOS-CUSTOM.md](GESTOS-CUSTOM.md). Respaldo: `f759a3a`.
+
 ## Sección central y audio
 
 Ver [AUDIO-Y-SECCION-CENTRAL.md](AUDIO-Y-SECCION-CENTRAL.md): perfil WASAPI para

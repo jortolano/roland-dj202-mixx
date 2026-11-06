@@ -228,6 +228,49 @@ y [control de tono de Mixxx 2.5](https://github.com/mixxxdj/mixxx/blob/2.5/src/e
 El código de Mixxx permite valores fuera del rango nominal del dial al escribir
 `pitch_adjust`, empleado aquí para los extremos de ±7 semitonos.
 
+## Jogs, tempo y toma suave
+
+| Gesto | Comportamiento | Procedencia |
+|---|---|---|
+| Tocar la superficie y girar el jog | Scratch del deck activo | Asignación heredada; calibración 512 ticks/45 RPM conservada |
+| Girar sin tocar la superficie | Ajuste temporal de velocidad (`jog`) | Asignación heredada |
+| Shift + girar | Buscar en la pista, limitado entre principio y final | Convención heredada; límites y validación corregidos |
+| Shift durante scratch | Liberar scratch y pasar a búsqueda | Regla propia de prioridad del modificador |
+| Fader tempo | Ajustar velocidad, con dirección coherente en decks 1–4 | Asignación heredada; corrección de inicialización en 3/4 |
+| Shift + fader tempo | Ajustar `pitch_adjust` entre +7 y −7 semitonos | Convención propia heredada, corregida para usar el control recomendado por Mixxx |
+| Shift + Keylock | Recorrer rangos 8%, 16%, 50% desde el rango real del deck | Asignación heredada; corrección para que no dependa del último deck usado |
+
+Tras usar Shift para salir de scratch mientras se mantiene la mano sobre el
+jog, **levantar y volver a tocar** para iniciar otro scratch. Soltar Shift no
+reengancha el scratch automáticamente. Cambiar de deck o descargar la pista
+también lo libera. Los mensajes tardíos identificados con el deck anterior no
+deben afectar al nuevo. Sin pista cargada no se envía scratch, bend ni búsqueda.
+No se recalibró la sensibilidad del jog sin una medición física.
+
+Shift + tempo sigue modificando el tono musical: **no es el clutch de tempo de
+Serato**. Ahora escribe `pitch_adjust` en lugar del tono total `pitch`, de acuerdo
+con [los controles de Mixxx](https://manual.mixxx.org/2.5/en/chapters/appendix/mixxx_controls).
+La dirección del fader se configura para cada deck al seleccionarlo.
+
+Al cambiar de deck, los potenciómetros usan la toma suave de Mixxx y se ignora
+la primera lectura para rearmarla en el destino. También se descartan los bytes
+MSB/LSB anteriores de los controles de 14 bits. Así, un paquete incompleto del
+deck anterior no debe convertirse en una posición del nuevo.
+
+**Cómo probar la toma suave:** dejar un fader/perilla en una posición de software
+distinta entre decks 1 y 3. Cambiar de deck y mover lentamente el control físico:
+el control en pantalla debe empezar a seguirlo al alcanzar su posición guardada.
+Repetir con decks 2 y 4. Esto puede parecer falta de respuesta al principio y es
+la protección prevista contra saltos de nivel o velocidad.
+
+La prueba automatizada verifica órdenes de scratch, prioridades de Shift,
+límites de búsqueda, ausencia de pista, liberación al cambiar de deck, dirección,
+decodificación de 14 bits y registro de toma suave en los cuatro decks.
+El motor simulado registra los parámetros normalizados del fader; **no valida
+la curva ni el algoritmo nativo de toma suave**, que requieren la prueba física.
+También se comprobó que ya no hay mensajes MIDI duplicados en el XML.
+Respaldo anterior: `f759a3a` (audio y preescucha confirmados).
+
 ## Otras diferencias ya existentes
 
 La sección central y la adaptación de audio para parlantes del PC + auriculares
