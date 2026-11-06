@@ -20,6 +20,21 @@ function setValue(g, k, v) {
   for (const c of [...connections]) {
     if (c.group === g && c.control === k) c.callback(v, g, k);
   }
+  // Model only the native loop operations needed to verify Slicer restoration.
+  if (v && k === 'loop_remove') {
+    setValue(g, 'loop_enabled', 0);
+    setValue(g, 'loop_start_position', -1);
+    setValue(g, 'loop_end_position', -1);
+  }
+  if (v && k === 'beatloop_activate' && getValue(g, 'local_bpm') > 0) {
+    const total = getValue(g, 'duration') * getValue(g, 'track_samplerate') * 2;
+    const start = getValue(g, 'playposition') * total;
+    const length = getValue(g, 'beatloop_size') * 60 / getValue(g, 'local_bpm') *
+      getValue(g, 'track_samplerate') * 2;
+    setValue(g, 'loop_start_position', start);
+    setValue(g, 'loop_end_position', start + length);
+    setValue(g, 'loop_enabled', 1);
+  }
 }
 function advance(ms) {
   const end = now + ms;
@@ -243,6 +258,141 @@ for (const deck of [1, 2, 3, 4]) {
   setValue(group, 'loop_end_position', -1);
   assert.ok(messages.some(m => m[1] === 0x15 && m[2] === 127));
   assert.ok(messages.some(m => m[1] === 0x16 && m[2] === 0));
+}
+left.setCurrentDeck('[Channel1]');
+right.setCurrentDeck('[Channel2]');
+
+// Slicer: independent settings, source-grid phase, pad numbering and cleanup.
+for (const deck of [1, 2, 3, 4]) {
+  const side = deck % 2 ? left : right;
+  const group = `[Channel${deck}]`;
+  side.setCurrentDeck(group);
+  const pads = side.padSection;
+  const settings = dj.getSlicerSettings(deck);
+  assert.equal(settings.domain, 8);
+  assert.equal(settings.quantization, 1);
+  setValue(group, 'track_loaded', 1);
+  setValue(group, 'duration', 100);
+  setValue(group, 'track_samplerate', 48000);
+  setValue(group, 'local_bpm', 120);
+  setValue(group, 'file_bpm', 120);
+  setValue(group, 'bpm', 180); // Tempo fader must not shift source-grid slices.
+  setValue(group, 'beat_closest', 5.1 * 96000); // Grid phase = 0.1 seconds.
+  setValue(group, 'playposition', 0.051);
+  setValue(group, 'loop_enabled', 0);
+  setValue(group, 'slip_enabled', 0);
+  setValue(group, 'loop_anchor', 1);
+  pads.setState(0, 0, 0x31, 0, group);
+  const samplerBase = deck % 2 ? 0 : 8;
+  for (let pad = 1; pad <= 8; pad++) {
+    setValue(group, 'playposition', 0.051);
+    const button = dj.sampler.button[samplerBase + pad];
+    writes.length = 0; messages.length = 0;
+    press(button, 127);
+    assert.ok(Math.abs(getValue(group, 'playposition') - (4.1 + (pad - 1) * 0.5) / 100) < 1e-8);
+    assert.equal(getValue(group, 'beatloop_size'), 1);
+    assert.equal(getValue(group, 'slip_enabled'), 1);
+    assert.ok(writes.some(w => w[0] === group && w[1] === 'beatloop_activate' && w[2] === 1));
+    assert.ok(messages.filter(m => m[0] === 0x94 + deck - 1 && m[1] >= 0x20 && m[1] <= 0x30)
+      .every(m => m[1] >= 0x21 && m[1] <= 0x28));
+    press(button, 0);
+    assert.equal(getValue(group, 'slip_enabled'), 0);
+    assert.equal(getValue(group, 'loop_anchor'), 1);
+  }
+
+  // Parameter changes repeat size; Shift+Parameter changes only this deck's domain.
+  pads.paramPlusMinus.input(0, 0x45, 127, 0x94, group);
+  pads.paramPlusMinus.input(0, 0x45, 0, 0x94, group);
+  assert.equal(settings.quantization, 0.5);
+  pads.paramPlusMinus.input(0, 0x4e, 127, 0x94, group);
+  pads.paramPlusMinus.input(0, 0x4e, 0, 0x94, group);
+  assert.equal(settings.domain, 16);
+  const otherDeck = deck === 4 ? 1 : deck + 1;
+  assert.equal(dj.getSlicerSettings(otherDeck).domain, otherDeck < deck ? 16 : 8);
+
+  // Shift pads stay in Slicer, rather than ejecting or triggering a sampler.
+  const first = dj.sampler.button[samplerBase + 1];
+  dj.shiftButton(0, 0, 127, 0, '');
+  writes.length = 0;
+  press(first, 127);
+  dj.shiftButton(0, 0, 0, 0, '');
+  press(first, 0);
+  assert.ok(writes.every(w => !w[0].startsWith('[Sampler')));
+
+  // Slicer Loop locks a native domain, and releases a slice back to that domain.
+  pads.setState(0, 0, 0x30, 0, group);
+  setValue(group, 'loop_start_position', 1000);
+  setValue(group, 'loop_end_position', 2000);
+  setValue(group, 'beatloop_size', 4);
+  setValue(group, 'loop_enabled', 1);
+  setValue(group, 'slip_enabled', 1);
+  setValue(group, 'playposition', 0.051);
+  pads.setState(0, 0, 0x32, 0, group);
+  const windowStart = getValue(group, 'loop_start_position');
+  const windowEnd = getValue(group, 'loop_end_position');
+  assert.ok(Math.abs(windowStart - 0.1 * 96000) < 1e-5);
+  assert.ok(Math.abs(windowEnd - windowStart - 16 * 48000) < 1e-5);
+  press(first, 127); press(first, 0);
+  assert.equal(getValue(group, 'loop_start_position'), windowStart);
+  assert.equal(getValue(group, 'loop_end_position'), windowEnd);
+  pads.setState(0, 0, 0x30, 0, group);
+  assert.equal(getValue(group, 'loop_start_position'), 1000);
+  assert.equal(getValue(group, 'loop_end_position'), 2000);
+  assert.equal(getValue(group, 'loop_enabled'), 1);
+  assert.equal(getValue(group, 'slip_enabled'), 1);
+
+  // Changing modes with a pad held restores the original state immediately.
+  pads.setState(0, 0, 0x31, 0, group);
+  press(first, 127);
+  pads.setState(0, 0, 0x30, 0, group);
+  assert.equal(getValue(group, 'loop_start_position'), 1000);
+  assert.equal(getValue(group, 'slip_enabled'), 1);
+
+  pads.setState(0, 0, 0x31, 0, group);
+  press(first, 127);
+  side.setCurrentDeck(`[Channel${deck <= 2 ? deck + 2 : deck - 2}]`);
+  assert.equal(dj.slicerStates[deck], undefined);
+  assert.equal(getValue(group, 'loop_start_position'), 1000);
+  assert.equal(getValue(group, 'slip_enabled'), 1);
+  side.setCurrentDeck(group);
+  pads.setState(0, 0, 0x30, 0, group);
+
+  // Repeated parameter presses clamp to supported values without leaking connections.
+  pads.setState(0, 0, 0x31, 0, group);
+  const connectionCount = connections.size;
+  for (let n = 0; n < 10; n++) {
+    pads.paramPlusMinus.input(0, 0x4e, 127, 0x94, group);
+    pads.paramPlusMinus.input(0, 0x4e, 0, 0x94, group);
+  }
+  assert.equal(settings.domain, 64);
+  assert.equal(connections.size, connectionCount);
+  for (let n = 0; n < 10; n++) {
+    pads.paramPlusMinus.input(0, 0x4d, 127, 0x94, group);
+    pads.paramPlusMinus.input(0, 0x4d, 0, 0x94, group);
+    pads.paramPlusMinus.input(0, 0x45, 127, 0x94, group);
+    pads.paramPlusMinus.input(0, 0x45, 0, 0x94, group);
+  }
+  assert.equal(settings.domain, 2);
+  assert.equal(settings.quantization, 0.125);
+  assert.equal(connections.size, connectionCount);
+  settings.domain = 16; // Leave the independent-deck checks above deterministic.
+
+  // Unloading a track while holding a slice releases our Slip without restoring old positions.
+  setValue(group, 'slip_enabled', 0);
+  press(first, 127);
+  setValue(group, 'track_loaded', 0);
+  assert.equal(getValue(group, 'slip_enabled'), 0);
+  assert.equal(dj.slicerStates[deck].previous, null);
+  setValue(group, 'track_loaded', 1);
+  pads.setState(0, 0, 0x30, 0, group);
+
+  // Missing grid disables slice actions, without non-finite position writes.
+  setValue(group, 'local_bpm', 0); setValue(group, 'file_bpm', 0);
+  pads.setState(0, 0, 0x31, 0, group);
+  writes.length = 0;
+  press(first, 127); press(first, 0);
+  assert.equal(writes.length, 0);
+  pads.setState(0, 0, 0x30, 0, group);
 }
 left.setCurrentDeck('[Channel1]');
 right.setCurrentDeck('[Channel2]');

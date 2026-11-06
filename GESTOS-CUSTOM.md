@@ -79,6 +79,81 @@ Referencia técnica: [controles de Mixxx 2.5](https://manual.mixxx.org/2.5/en/ch
 Las pruebas verifican las órdenes y LEDs en los cuatro decks con motor simulado;
 el comportamiento de audio y la confirmación física siguen pendientes.
 
+## Slicer y Slicer Loop
+
+### Selección física y diferencia con Sampler
+
+Según el manual Roland local, página 6:
+
+- SAMPLER una vez: Sampler; botón encendido fijo.
+- Shift + SAMPLER: Slicer; botón con parpadeo lento. Soltar ambos antes de probar pads.
+- SAMPLER dos veces: Slicer Loop; botón con parpadeo rápido.
+- Shift + SAMPLER dos veces: disposición sampler/loops dividida; no es Slicer Loop.
+
+En el Sampler de nuestro mapeo, un pad vacío carga la pista seleccionada en la
+biblioteca (`LoadSelectedTrack`); un pad cargado la reproduce como fuente auxiliar
+(`cue_gotoandplay`). No graba ni recorta la parte que está sonando en un deck.
+Mantener el pad no determina la duración de una grabación. Shift + pad detiene
+un sample que está reproduciendo o expulsa uno detenido.
+
+Para probar Slicer: reproducir una pista, mantener Shift, pulsar SAMPLER una
+sola vez, soltar ambos y comprobar parpadeo lento antes de mantener un pad.
+Debe repetir una porción del deck, sin cargar una pista en el sampler.
+Si aun con parpadeo lento carga una pista auxiliar, investigar la recepción
+del cambio de modo: la luz física por sí sola no prueba que el script lo recibió.
+
+| Gesto / modo | Comportamiento implementado | Procedencia |
+|---|---|---|
+| Slicer | Ventana móvil dividida en ocho partes; mantener un pad repite desde esa parte | Adaptación propia sobre controles de Mixxx; no copia del código de Serato |
+| Slicer Loop | Ventana fija que se repite; mantener un pad repite una porción y soltar vuelve a la ventana fija | Adaptación propia con loop nativo de Mixxx |
+| Parameter − / + | Repetición de 1/8, 1/4, 1/2 o 1 beat | Valores y gesto de la referencia Serato; implementación propia |
+| Shift + Parameter − / + | Ventana de 2, 4, 8, 16, 32 o 64 beats | Valores y gesto de la referencia Serato; implementación propia |
+| Shift + pad | Mantener la acción Slicer; no ejecutar acciones de sampler | Decisión propia para evitar expulsiones accidentales |
+
+Los ajustes son independientes para cada deck, también 3 y 4. Empiezan en
+ventana de ocho beats y repetición de un beat. Se conservan durante esta sesión,
+pero no se guardan en disco. El tamaño de repetición es independiente del tamaño
+de cada porción de la ventana.
+
+Al cambiar la ventana o repetición se libera cualquier pad mantenido y se
+reinicializa la ventana. Si se pulsan varios pads, el último domina; soltar un
+pad anterior no cancela el último. Para volver al audio normal en Slicer se
+suelta el último pad. En Slicer Loop sigue sonando la ventana fija hasta salir
+del modo. Cambiar de deck o salir del modo también libera la acción anterior.
+
+El mapeo conserva Slip, tamaño, ancla y posiciones del loop anterior y su estado
+activado/desactivado, y los restaura al liberar la acción correspondiente.
+Se usa `loop_remove` para desacoplar el loop temporal de un posible loop guardado
+antes de modificar posiciones: no se pretende editar el hotcue guardado.
+La restauración recupera posiciones y estado, **no el vínculo de edición con la
+ranura de un loop guardado**. Si se carga otra pista, se descartan las posiciones
+anteriores para no escribirlas en la nueva pista.
+
+Los LEDs de los ocho pads quedan a cargo de Slicer mientras ese modo está activo.
+En Slicer se ilumina la porción actual; en Slicer Loop se invierte ese patrón.
+No se altera la biblioteca de samples al usar pads de Slicer con Shift.
+
+### Límites y pruebas
+
+La posición se calcula sobre muestras de la pista, usando su BPM local (o de
+archivo), la fase de `beat_closest` y el tamaño de la ventana. El fader de tempo
+no define el tamaño de los cortes. **Es una aproximación para pistas con tempo
+estable**: no implementa reconstrucción de una beatgrid con cambios de tempo.
+Sin pista, sin BPM/beatgrid o sin duración/sample rate válidos no dispara cortes.
+Una ventana fija que exceda el inicio o final de la pista no se activa.
+
+No se afirma equivalencia temporal con el Slicer de Serato. La cuantización
+implementada es el tamaño de repetición del loop temporal, no un planificador
+de disparos que espera una futura división del beat.
+
+`test-callbacks.cjs` cubre los ocho pads en cuatro decks, fase de beatgrid,
+independencia del fader de tempo, ajustes y límites de Parameter, conservación
+de Slip/loop, cambio de modo/deck con pads mantenidos, descarga de pista y
+aislamiento del sampler con Shift. Simula las operaciones nativas de loop y
+no sustituye una prueba de audio en Mixxx.
+
+Respaldo antes de estos cambios: `a0d7a18` (pads y loops confirmados).
+
 ## Otras diferencias ya existentes
 
 No se modifican en esta actualización. Son decisiones heredadas o adaptaciones
@@ -95,8 +170,8 @@ propias, no errores que deban sustituirse automáticamente por la función Serat
 - Keylock mantenido habilita ajuste de tono con Parameter; ambos Parameter
   reinician tono. Shift + Keylock recorre rangos de tempo 8%, 16% y 50%.
 - Parameter se usa para beatjump, desplazamiento/tamaño de loop y ajuste de tono.
-- Slicer usa una ventana fija de ocho beats; Cue Loop usa dos beats por defecto;
-  Pitch Play usa un rango fijo. Son implementaciones parciales/adaptadas.
+- Cue Loop usa dos beats por defecto; Pitch Play usa un rango fijo.
+  Slicer y sus límites se describen en la sección anterior.
 - El sampler usa dieciséis posiciones fijas; no replica bancos/salidas de Serato.
 
 Para estado de cobertura, límites y funciones aún ausentes, consultar la matriz.

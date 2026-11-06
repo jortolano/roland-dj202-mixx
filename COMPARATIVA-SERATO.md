@@ -10,6 +10,11 @@ alternancia y Shift para relanzar, salida del loop sin detener playback y LEDs
 de posiciones corregidos. Son cambios posteriores a la matriz histórica;
 su contrato actual está en GESTOS-CUSTOM.md.
 
+Actualización Slicer: parámetros de repetición/ventana por deck, numeración de
+los ocho pads corregida, ventana fija nativa en Slicer Loop y limpieza al cambiar
+modo/deck. La temporización sigue siendo una aproximación para tempo estable;
+no se afirma paridad con Serato. Ver GESTOS-CUSTOM.md para límites y pruebas.
+
 Revisión estática: 6 de noviembre de 2026. Respaldo anterior a esta comparación:
 **04a0a21**. Incluye la corrección de FX, pruebas y los dos manuales locales.
 Esta revisión no modifica las asignaciones ni el mapeo instalado.

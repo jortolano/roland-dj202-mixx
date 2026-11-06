@@ -113,6 +113,9 @@ DJ202.autoShowDecks = function(value, group, control) {
 };
 
 DJ202.shutdown = function() {
+  Object.keys(DJ202.slicerStates).forEach(function(deck) {
+    DJ202.stopSlicer('[Channel' + deck + ']');
+  });
   Object.keys(DJ202.timers).forEach(function(id) { DJ202.stopTimer(Number(id)); });
   DJ202.connections.slice().forEach(function(connection) { connection.disconnect(); });
   (DJ202.deck || []).forEach(function(deck) {
@@ -415,9 +418,13 @@ DJ202.Deck = function(deckNumbers, offset) {
   });
 
   this.setCurrentDeck = function(deck) {
+    if (this.currentDeck && this.currentDeck !== deck) {
+      DJ202.stopSlicer(this.currentDeck);
+    }
     components.Deck.prototype.setCurrentDeck.call(this, deck);
     DJ202.effectUnit[offset + 1].focusedDeck = script.deckFromGroup(deck);
     DJ202.effectUnit[offset + 1].reconnect();
+    DJ202.connectSlicer(deck, this.padSection.mode);
   }
 };
 
@@ -526,6 +533,11 @@ DJ202.SamplerButton.prototype.connect = function() {
 
 DJ202.SamplerButton.prototype.send = function(value) {
   var isLeftDeck = this.number <= 8;
+  var side = isLeftDeck ? DJ202.leftDeck : DJ202.rightDeck;
+  if (side && (side.padSection.mode === DJ202.PadMode.SLICER ||
+               side.padSection.mode === DJ202.PadMode.SLICERLOOP)) {
+    return; // Slicer owns these LEDs while it is active.
+  }
   var channel = isLeftDeck ? 0x94 : 0x95;
   this.midi = [ channel, 0x20 + this.number - (isLeftDeck ? 0 : 8) ];
   components.SamplerButton.prototype.send.call(this, value);
@@ -546,6 +558,20 @@ DJ202.SamplerButton.prototype.unshift = function() {
       return;
     }
     components.SamplerButton.prototype.input.apply(this, arguments);
+  };
+};
+
+DJ202.SamplerButton.prototype.shift = function() {
+  components.SamplerButton.prototype.shift.call(this);
+  var samplerInput = this.input;
+  this.input = function(channel, control, value, status, group) {
+    var side = this.number <= 8 ? DJ202.leftDeck : DJ202.rightDeck;
+    var mode = side.padSection.mode;
+    if (mode === DJ202.PadMode.SLICER || mode === DJ202.PadMode.SLICERLOOP) {
+      DJ202.slicer(value, this.number, mode === DJ202.PadMode.SLICERLOOP);
+      return;
+    }
+    samplerInput.apply(this, arguments);
   };
 };
 
@@ -1192,6 +1218,23 @@ DJ202.ParamButtons.prototype.input = function(channel, control, value, status,
     return
   }
 
+  var side = deck % 2 ? DJ202.leftDeck : DJ202.rightDeck;
+  if (side.padSection.mode === DJ202.PadMode.SLICER ||
+      side.padSection.mode === DJ202.PadMode.SLICERLOOP) {
+    var settings = DJ202.getSlicerSettings(deck);
+    var shifted = control >= 0x49;
+    var choices = shifted ? [2, 4, 8, 16, 32, 64] : [0.125, 0.25, 0.5, 1];
+    var setting = shifted ? 'domain' : 'quantization';
+    var index = choices.indexOf(settings[setting]);
+    var next = Math.max(0, Math.min(choices.length - 1, index + (isPlus ? 1 : -1)));
+    if (choices[next] !== settings[setting]) {
+      DJ202.stopSlicer(group);
+      settings[setting] = choices[next];
+      DJ202.connectSlicer(group, side.padSection.mode);
+    }
+    return;
+  }
+
   if (this.active.every(Boolean)) {
     script.triggerControl(group, 'reset_key');
     return;
@@ -1233,89 +1276,199 @@ DJ202.ParamButtons.prototype.input = function(channel, control, value, status,
 
 ///////////////////////////////////////////////////////////////////////////////
 // SLICER
-DJ202.slicerConnections = [ null, null, null, null ];
-DJ202.slicerBeatsPassed = [ 0, 0, 0, 0 ];
-DJ202.slicerPreviousBeatsPassed = [ 0, 0, 0, 0 ];
-DJ202.slicerAlreadyJumped = [ false, false, false, false ];
+DJ202.slicerSettings = {};
+DJ202.slicerStates = {};
 
-DJ202.slicerBeatCounter = function(value, group, control) {
-  if (engine.getValue(group, "beat_closest") ===
-      engine.getValue(group, "beat_next")) {
+DJ202.getSlicerSettings = function(deck) {
+  if (!DJ202.slicerSettings[deck]) {
+    DJ202.slicerSettings[deck] = {domain : DJ202.slicerBeatsWindow, quantization : 1};
+  }
+  return DJ202.slicerSettings[deck];
+};
+
+// Estimate constant-tempo grid positions in source samples, independent of rate.
+// A missing beatgrid is intentionally not treated as a usable slicer grid.
+DJ202.slicerPosition = function(group) {
+  var duration = engine.getValue(group, 'duration');
+  var rate = engine.getValue(group, 'track_samplerate');
+  var bpm = engine.getValue(group, 'local_bpm') || engine.getValue(group, 'file_bpm');
+  var closest = engine.getValue(group, 'beat_closest');
+  if (!engine.getValue(group, 'track_loaded') || duration <= 0 || rate <= 0 ||
+      bpm <= 0 || closest < 0) {
+    return null;
+  }
+  var samplesPerBeat = 60 / bpm * rate * 2;
+  var offset = ((closest % samplesPerBeat) + samplesPerBeat) % samplesPerBeat;
+  if (offset < 0.001 || samplesPerBeat - offset < 0.001) {
+    offset = 0;
+  }
+  var total = duration * rate * 2;
+  var beat = (engine.getValue(group, 'playposition') * total - offset) / samplesPerBeat;
+  return {beat : beat, offset : offset, samplesPerBeat : samplesPerBeat, total : total};
+};
+
+DJ202.captureSlicerLoop = function(group) {
+  return {
+    enabled : engine.getValue(group, 'loop_enabled'),
+    start : engine.getValue(group, 'loop_start_position'),
+    end : engine.getValue(group, 'loop_end_position'),
+    size : engine.getValue(group, 'beatloop_size'),
+    anchor : engine.getValue(group, 'loop_anchor'),
+    slip : engine.getValue(group, 'slip_enabled')
+  };
+};
+
+DJ202.restoreSlicerLoop = function(group, state) {
+  if (!state.previous) {
+    return;
+  }
+  var previous = state.previous;
+  state.previous = null;
+  script.triggerControl(group, 'loop_remove');
+  engine.setValue(group, 'slip_enabled', previous.slip);
+  engine.setValue(group, 'loop_start_position', previous.start);
+  engine.setValue(group, 'loop_end_position', previous.end);
+  engine.setValue(group, 'beatloop_size', previous.size);
+  engine.setValue(group, 'loop_anchor', previous.anchor);
+  engine.setValue(group, 'loop_enabled', previous.enabled);
+};
+
+DJ202.stopSlicer = function(group) {
+  var deck = script.deckFromGroup(group);
+  var state = DJ202.slicerStates[deck];
+  if (!state) {
+    return;
+  }
+  delete DJ202.slicerStates[deck];
+  state.connections.forEach(function(connection) { connection.disconnect(); });
+  DJ202.restoreSlicerLoop(group, state);
+  for (var pad = 1; pad <= 8; pad++) {
+    midi.sendShortMsg(0x94 + deck - 1, 0x20 + pad, 0);
+  }
+};
+
+DJ202.connectSlicer = function(group, mode) {
+  if (mode !== DJ202.PadMode.SLICER && mode !== DJ202.PadMode.SLICERLOOP) {
     return;
   }
   var deck = script.deckFromGroup(group);
-  var isLeftDeck = deck % 2;
-  var channel = isLeftDeck ? 0x94 : 0x95;
-  var padMode = isLeftDeck ? DJ202.leftDeck.padSection.mode
-                           : DJ202.rightDeck.padSection.mode;
-
-  var playposition = engine.getValue(group, 'playposition');
-  var bpm = engine.getValue(group, 'bpm');
-  var duration = engine.getValue(group, 'duration');
-  DJ202.slicerBeatsPassed[deck] =
-      Math.round((playposition * duration) * (bpm / 60));
-  var slicerPosInSection =
-      Math.floor((DJ202.slicerBeatsPassed[deck] % DJ202.slicerBeatsWindow) /
-                 (DJ202.slicerBeatsWindow / 8));
-
-  if (padMode === DJ202.PadMode.SLICERLOOP) {
-    // jump to loop the slicer section
-    if (((DJ202.slicerBeatsPassed[deck] - 1) % DJ202.slicerBeatsWindow) ===
-            (DJ202.slicerBeatsWindow - 1) &&
-        !DJ202.slicerAlreadyJumped[deck] &&
-        DJ202.slicerPreviousBeatsPassed[deck] < DJ202.slicerBeatsPassed[deck]) {
-      engine.setValue(group, "beatjump", -DJ202.slicerBeatsWindow);
-      DJ202.slicerAlreadyJumped[deck] = true;
-    } else {
-      DJ202.slicerAlreadyJumped[deck] = false;
-    }
+  if (DJ202.slicerStates[deck]) {
+    return;
   }
+  var state = {mode : mode, origin : null, held : null, connections : []};
+  DJ202.slicerStates[deck] = state;
+  var update = function() { DJ202.updateSlicer(group); };
+  state.connections.push(DJ202.makeConnection(group, 'playposition', update));
+  state.connections.push(DJ202.makeConnection(group, 'track_loaded', function() {
+    // Track changes invalidate saved loop positions; do not restore into a new track.
+    if (state.previous) {
+      engine.setValue(group, 'loop_enabled', 0);
+      engine.setValue(group, 'slip_enabled', state.previous.slip);
+    }
+    state.previous = null;
+    state.slicePrevious = null;
+    state.origin = null;
+    state.held = null;
+    state.lastLED = null;
+    if (!engine.getValue(group, 'track_loaded')) {
+      for (var pad = 1; pad <= 8; pad++) {
+        midi.sendShortMsg(0x94 + deck - 1, 0x20 + pad, 0);
+      }
+      return;
+    }
+    DJ202.updateSlicer(group);
+  }));
+  update();
+};
 
-  // light the current position LED
-  for (var i = 0; i < 8; ++i) {
-    var toggleLED =
-        (padMode == DJ202.PadMode.SLICER ? slicerPosInSection === i
-                                         : slicerPosInSection !== i);
-    midi.sendShortMsg(channel, 0x20 + i + 1, (toggleLED ? 0x7F : 0x0));
+DJ202.updateSlicer = function(group) {
+  var deck = script.deckFromGroup(group);
+  var state = DJ202.slicerStates[deck];
+  var position = DJ202.slicerPosition(group);
+  if (!state || !position) {
+    return;
+  }
+  var settings = DJ202.getSlicerSettings(deck);
+  if (state.origin === null || (state.mode === DJ202.PadMode.SLICER && state.held === null)) {
+    state.origin = Math.floor((position.beat + 0.000001) / settings.domain) * settings.domain;
+  }
+  if (state.mode === DJ202.PadMode.SLICERLOOP && !state.previous) {
+    var start = position.offset + state.origin * position.samplesPerBeat;
+    var end = start + settings.domain * position.samplesPerBeat;
+    if (start < 0 || end > position.total) {
+      return;
+    }
+    state.previous = DJ202.captureSlicerLoop(group);
+    script.triggerControl(group, 'loop_remove');
+    engine.setValue(group, 'loop_start_position', start);
+    engine.setValue(group, 'loop_end_position', end);
+    engine.setValue(group, 'loop_enabled', 1);
+  }
+  var index = Math.max(0, Math.min(7,
+      Math.floor((position.beat - state.origin) / (settings.domain / 8) + 0.000001)));
+  var led = state.held === null ? index : state.held;
+  if (state.lastLED === led) {
+    return;
+  }
+  state.lastLED = led;
+  for (var i = 0; i < 8; i++) {
+    var on = state.mode === DJ202.PadMode.SLICERLOOP ? i !== led : i === led;
+    midi.sendShortMsg(0x94 + deck - 1, 0x21 + i, on ? 0x7f : 0);
   }
 };
 
 DJ202.slicer = function(value, number, isSlicerLoop) {
-  var isLeftDeck = number <= 8;
-  var group =
-      isLeftDeck ? DJ202.leftDeck.currentDeck : DJ202.rightDeck.currentDeck;
+  var side = number <= 8 ? DJ202.leftDeck : DJ202.rightDeck;
+  var group = side.currentDeck;
   var deck = script.deckFromGroup(group);
-  var index = isLeftDeck ? number : number - 8;
-  var channel = isLeftDeck ? 0x94 : 0x95;
-
-  var domain = DJ202.slicerBeatsWindow;
-  var beatsToJump = 0;
-
-  // LED indicator
-  midi.sendShortMsg(channel, 0x20 + index + 1, (value ? 0x7F : 0x0));
-
-  if (value) {
-    engine.setValue(group, "reloop_toggle", 1);
-    beatsToJump =
-        (index * (domain / 8)) - ((DJ202.slicerBeatsPassed[deck] % domain) + 1);
-    if (index === 0 && beatsToJump === -domain) {
-      beatsToJump = 0;
-    }
-    if (DJ202.slicerBeatsPassed[deck] >= Math.abs(beatsToJump) &&
-        DJ202.slicerPreviousBeatsPassed[deck] !==
-            DJ202.slicerBeatsPassed[deck]) {
-      DJ202.slicerPreviousBeatsPassed[deck] = DJ202.slicerBeatsPassed[deck];
-      if (Math.abs(beatsToJump) > 0) {
-        engine.setValue(group, "beatjump", beatsToJump);
+  var index = (number - 1) % 8;
+  var state = DJ202.slicerStates[deck];
+  if (!state) {
+    return;
+  }
+  if (!value) {
+    if (state.held === index) {
+      state.held = null;
+      if (!isSlicerLoop) {
+        DJ202.restoreSlicerLoop(group, state);
+      } else if (state.slicePrevious) {
+        DJ202.restoreSlicerLoop(group, {previous : state.slicePrevious});
+        state.slicePrevious = null;
       }
+      DJ202.updateSlicer(group);
     }
+    return;
   }
-
-   if (!isSlicerLoop) {
-     engine.setValue(group, "slip_enabled", value);
-     engine.setValue(group, "beatloop_size", 1);
-     engine.setValue(group, "beatloop_activate", value);
+  var position = DJ202.slicerPosition(group);
+  if (!position || state.origin === null) {
+    return;
   }
+  var settings = DJ202.getSlicerSettings(deck);
+  var target = (position.offset + (state.origin + index * settings.domain / 8) *
+                position.samplesPerBeat) / position.total;
+  if (target < 0 || target >= 1) {
+    return;
+  }
+  if (!isSlicerLoop) {
+    if (!state.previous) {
+      state.previous = DJ202.captureSlicerLoop(group);
+    }
+    engine.setValue(group, 'slip_enabled', 1);
+    script.triggerControl(group, 'loop_remove');
+  } else if (!state.previous) {
+    return;
+  } else {
+    if (!state.slicePrevious) {
+      state.slicePrevious = DJ202.captureSlicerLoop(group);
+    }
+    script.triggerControl(group, 'loop_remove');
+  }
+  state.held = index;
+  engine.setValue(group, 'playposition', target);
+  engine.setValue(group, 'loop_anchor', 0);
+  engine.setValue(group, 'beatloop_size', settings.quantization);
+  script.triggerControl(group, 'beatloop_activate');
+  DJ202.updateSlicer(group);
 };
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1396,13 +1549,7 @@ DJ202.PadSection.prototype =
 
 DJ202.PadSection.prototype.setState = function(channel, control, value, status,
                                                group) {
-  // reset to defaults first
-  // stop the slicer
-  if (DJ202.slicerConnections[script.deckFromGroup(group)]) {
-    DJ202.slicerConnections[script.deckFromGroup(group)].disconnect();
-  }
-  this.reconnectComponents();
-  DJ202.sampler.reconnectComponents();
+  DJ202.stopSlicer(group);
 
   switch (value) {
   case 0x0:
@@ -1447,14 +1594,16 @@ DJ202.PadSection.prototype.setState = function(channel, control, value, status,
     this.mode = DJ202.PadMode.SAMPLER;
     break;
   case 0x32:
-    DJ202.slicerConnections[script.deckFromGroup(group)] =
-        DJ202.makeConnection(group, 'beat_active', DJ202.slicerBeatCounter);
     this.mode = DJ202.PadMode.SLICERLOOP;
     break;
   case 0x31:
-    DJ202.slicerConnections[script.deckFromGroup(group)] =
-        DJ202.makeConnection(group, 'beat_active', DJ202.slicerBeatCounter);
     this.mode = DJ202.PadMode.SLICER;
     break;
   };
+  this.reconnectComponents();
+  DJ202.sampler.reconnectComponents();
+  if (this.mode === DJ202.PadMode.PITCHPLAY && this.pitchplayCue > 0) {
+    this.setHotcueLED(this.pitchplayCue);
+  }
+  DJ202.connectSlicer(group, this.mode);
 };

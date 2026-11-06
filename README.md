@@ -1,5 +1,15 @@
 # Roland DJ-202 para Mixxx
 
+## Slicer
+
+Se corrigieron los ocho índices de pad, los LEDs y el aislamiento respecto al
+sampler con Shift. Slicer tiene ventana móvil; Slicer Loop usa un loop fijo nativo.
+Parameter cambia repetición y Shift + Parameter cambia ventana, con ajustes por
+deck. Se restauran Slip y posiciones del loop al salir o cambiar de deck.
+La aproximación actual requiere tempo estable y beatgrid: los límites y gestos
+están en [GESTOS-CUSTOM.md](GESTOS-CUSTOM.md). Pruebas de script en cuatro decks
+pasadas; falta prueba física y de audio. Respaldo anterior: `a0d7a18`.
+
 ## Pads y loops
 
 Se corrigió el borrado de hotcues durante reproducción, Cue Loop usa los
