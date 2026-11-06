@@ -1,5 +1,9 @@
 # Roland DJ-202 para Mixxx
 
+Los gestos propios, su procedencia y sus diferencias respecto a Serato están
+documentados en [GESTOS-CUSTOM.md](GESTOS-CUSTOM.md). Incluye la nueva acción
+**Shift + mantener FX para quitar foco** y el enrutamiento por toque corto al soltar.
+
 ## Corrección de callbacks y LEDs
 
 Se enlazaron los callbacks de Play, cambio de deck, FX, Sync, Slip y keylock

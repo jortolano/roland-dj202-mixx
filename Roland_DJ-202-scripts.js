@@ -687,60 +687,61 @@ DJ202.EffectButton.prototype.output = function(value, group, control) {
   DJ202.FlashingButton.prototype.output.apply(this, arguments);
 };
 
+// Keep a gesture attached to the layer where it began, even if Shift changes.
+DJ202.EffectButton.prototype.input = function(channel, control, value, status) {
+  if (this.isPress(channel, control, value, status)) {
+    if (this.pressAction) {
+      return;
+    }
+    this.pressAction = {
+      shifted : Boolean(this.fxShifted),
+      group : this.group,
+      key : this.inKey,
+      longPressed : false
+    };
+    var action = this.pressAction;
+    this.longPressTimer = DJ202.beginTimer(this.longPressTimeout, function() {
+      this.longPressTimer = null;
+      action.longPressed = true;
+      engine.setValue(this.effectUnitGroup, 'focused_effect',
+                      action.shifted ? 0 : this.effectNumber);
+      this.flash();
+    }.bind(this), true);
+    return;
+  }
+
+  if (this.longPressTimer) {
+    DJ202.stopTimer(this.longPressTimer);
+    this.longPressTimer = null;
+  }
+  var action = this.pressAction;
+  this.pressAction = null;
+  if (action && !action.longPressed) {
+    var wasEnabled = engine.getValue(action.group, action.key);
+    script.toggleControl(action.group, action.key);
+    if (!action.shifted && !wasEnabled && DJ202.autoFocusEffects) {
+      engine.setValue(this.effectUnitGroup, 'focused_effect', this.effectNumber);
+      this.flash();
+    }
+  }
+  // Restore the LED after the hardware resets it on release.
+  this.trigger();
+};
+
 DJ202.EffectButton.prototype.unshift = function() {
+  this.fxShifted = false;
   this.group = this.effectGroup;
   this.outKey = 'enabled';
   this.inKey = this.outKey;
   this.trigger();
-  this.input = function(channel, control, value, status) {
-    if (this.isPress(channel, control, value, status)) {
-      this.isLongPressed = false;
-      this.longPressTimer =
-          DJ202.beginTimer(this.longPressTimeout, function() {
-            engine.setValue(this.effectUnitGroup, 'focused_effect',
-                            this.effectNumber);
-            this.isLongPressed = true;
-            this.flash();
-          }.bind(this), true);
-      return;
-    } // Else: on button release.
-
-    if (this.longPressTimer) {
-      DJ202.stopTimer(this.longPressTimer);
-      this.longPressTimer = null;
-    }
-
-    // Work-around the indicator LED self-disabling itself on release.
-    this.trigger();
-
-    if (!this.isLongPressed) { // Release after long press.
-      var wasEnabled = engine.getValue(this.group, 'enabled');
-      script.toggleControl(this.group, 'enabled');
-      if (!wasEnabled && DJ202.autoFocusEffects) {
-        engine.setValue(this.effectUnitGroup, 'focused_effect',
-                        this.effectNumber);
-        this.flash();
-      }
-      return;
-    } // Else: release after short press.
-
-    this.isLongPressed = false;
-  }
 };
 
 DJ202.EffectButton.prototype.shift = function() {
+  this.fxShifted = true;
   this.group = this.routingGroup;
   this.outKey = this.routingControl;
   this.inKey = this.outKey;
   this.trigger();
-  this.input = function(channel, control, value, status) {
-    if (value) {
-      this.inToggle();
-    } else {
-      // Work-around the indicator LED self-disabling itself on release.
-      this.trigger();
-    }
-  };
 };
 
 DJ202.EffectModeButton = function(effectUnitNumber) {
@@ -756,20 +757,27 @@ DJ202.EffectModeButton.prototype =
 DJ202.EffectModeButton.prototype.input = function(channel, control, value,
                                                   status) {
   if (value) { // Button press.
+    if (!this.pressAction) {
+      this.pressAction = {
+        effect : engine.getValue(this.group, 'focused_effect'),
+        direction : this.shifted ? -1 : 1
+      };
+    }
     return;
   } // Else: Button release.
 
   // Work-around the indicator LED self-disabling itself on release.
   this.trigger();
 
-  var focusedEffect = engine.getValue(this.group, 'focused_effect');
-  if (!focusedEffect) {
+  var action = this.pressAction;
+  this.pressAction = null;
+  if (!action || !action.effect) {
     return
   }
 
   var effectGroup = '[EffectRack1_EffectUnit' + this.effectUnitNumber +
-                    '_Effect' + focusedEffect + ']';
-  engine.setValue(effectGroup, 'effect_selector', this.shifted ? -1 : 1);
+                    '_Effect' + action.effect + ']';
+  engine.setValue(effectGroup, 'effect_selector', action.direction);
 };
 
 DJ202.EffectModeButton.prototype.shift =

@@ -110,10 +110,57 @@ const fx = dj.effectUnit[1].button[1];
 press(fx, 127); advance(300); press(fx, 0); advance(600);
 assert.equal(getValue('[EffectRack1_EffectUnit1]', 'focused_effect'), 1);
 assert.equal(getValue(fx.effectGroup, 'enabled'), 0);
+
+// Shift+hold clears focus without touching routing, for every FX slot/unit.
+for (const unit of [1, 2]) {
+  const eu = dj.effectUnit[unit];
+  for (const slot of [1, 2, 3]) {
+    const button = eu.button[slot];
+    button.unshift();
+    press(button, 127); advance(300); press(button, 0);
+    assert.equal(getValue(eu.group, 'focused_effect'), slot);
+    const enabled = getValue(button.effectGroup, 'enabled');
+    const routing = getValue(button.routingGroup, button.routingControl);
+    button.shift();
+    press(button, 127); advance(300);
+    assert.equal(getValue(eu.group, 'focused_effect'), 0);
+    button.unshift(); // Release Shift before the held FX button.
+    press(button, 0); advance(600);
+    assert.equal(getValue(button.effectGroup, 'enabled'), enabled);
+    assert.equal(getValue(button.routingGroup, button.routingControl), routing);
+
+    // Shift+tap retains routing, commits on release, and ignores a stray release.
+    button.shift(); press(button, 127); advance(100);
+    assert.equal(getValue(button.routingGroup, button.routingControl), routing);
+    button.unshift(); press(button, 0);
+    assert.equal(getValue(button.routingGroup, button.routingControl), Number(!routing));
+    press(button, 0);
+    assert.equal(getValue(button.effectGroup, 'enabled'), enabled);
+
+    // Pressing Shift after starting a normal hold must not change that gesture.
+    press(button, 127); button.shift(); advance(300); press(button, 0);
+    assert.equal(getValue(eu.group, 'focused_effect'), slot);
+    button.unshift(); advance(600);
+  }
+}
 messages.length = 0; setValue(fx.effectGroup, 'enabled', 1);
 assert.ok(messages.some(m => m[0] === 0x98 && m[1] === 0 && m[2] === 127));
 press(fx, 127); advance(100); press(fx, 0);
 assert.equal(getValue(fx.effectGroup, 'enabled'), 0);
+
+// Play hold uses the brake path; a short tap still toggles transport.
+// Exercise the actual global Shift handler and effect selection in both directions.
+setValue(dj.effectUnit[1].group, 'focused_effect', 2);
+const mode = dj.effectUnit[1].effectMode;
+press(mode, 127); press(mode, 0);
+assert.equal(getValue('[EffectRack1_EffectUnit1_Effect2]', 'effect_selector'), 1);
+dj.shiftButton(0, 0, 127, 0, '');
+assert.equal(fx.fxShifted, true);
+press(mode, 127);
+dj.shiftButton(0, 0, 0, 0, '');
+press(mode, 0);
+assert.equal(getValue('[EffectRack1_EffectUnit1_Effect2]', 'effect_selector'), -1);
+assert.equal(fx.fxShifted, false);
 
 // Play hold uses the brake path; a short tap still toggles transport.
 setValue('[Channel1]', 'play', 1);
