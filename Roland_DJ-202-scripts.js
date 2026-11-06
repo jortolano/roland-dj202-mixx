@@ -415,13 +415,13 @@ DJ202.EffectUnit = function(unitNumber) {
   this.knob = new components.Pot({
     unshift : function() {
       this.input = function(channel, control, value, status) {
-        value = (this.MSB << 7) + value;
-
         var focusedEffect = engine.getValue(eu.group, 'focused_effect');
-        if (focusedEffect !== 0) {
+        var firstEffect = focusedEffect || 1;
+        var lastEffect = focusedEffect || 3;
+        for (var effect = firstEffect; effect <= lastEffect; effect++) {
           var effectGroup = '[EffectRack1_EffectUnit' + unitNumber + '_Effect' +
-                            focusedEffect + ']';
-          engine.setParameter(effectGroup, 'meta', value / this.max);
+                            effect + ']';
+          engine.setParameter(effectGroup, 'meta', value / 0x7f);
         }
         engine.softTakeoverIgnoreNextValue(eu.group, 'mix');
       };
@@ -429,10 +429,11 @@ DJ202.EffectUnit = function(unitNumber) {
     shift : function() {
       this.input = function(channel, control, value, status) {
         engine.setParameter(eu.group, 'mix', value / 0x7f);
-        var focusedEffect = engine.getValue(eu.group, 'focused_effect');
-        var effectGroup = '[EffectRack1_EffectUnit' + unitNumber + '_Effect' +
-                          focusedEffect + ']';
-        engine.softTakeoverIgnoreNextValue(effectGroup, 'meta');
+        for (var effect = 1; effect <= 3; effect++) {
+          var effectGroup = '[EffectRack1_EffectUnit' + unitNumber + '_Effect' +
+                            effect + ']';
+          engine.softTakeoverIgnoreNextValue(effectGroup, 'meta');
+        }
       }
     }
   });
