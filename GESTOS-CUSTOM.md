@@ -230,6 +230,11 @@ El código de Mixxx permite valores fuera del rango nominal del dial al escribir
 
 ## Otras diferencias ya existentes
 
+La sección central y la adaptación de audio para parlantes del PC + auriculares
+DJ-202 están en [AUDIO-Y-SECCION-CENTRAL.md](AUDIO-Y-SECCION-CENTRAL.md). Incluye
+la ruta Booth propia, el ajuste inicial de `headMix`, el CUE de grupo del sampler
+y la limitación pendiente del Tap FX independiente.
+
 No se modifican en esta actualización. Son decisiones heredadas o adaptaciones
 propias, no errores que deban sustituirse automáticamente por la función Serato:
 

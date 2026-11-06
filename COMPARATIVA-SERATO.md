@@ -21,6 +21,12 @@ ajuste anterior al liberar/salir. Los pads vacíos no crean cues; Shift + Parame
 repite la selección de rango. Son decisiones propias documentadas; la matriz
 siguiente conserva el diagnóstico inicial y no describe estas correcciones.
 
+Actualización sección central: volumen/PFL del sampler corregidos y perfil de
+audio PC + auriculares DJ-202 instalado. MASTER LEVEL y PHONES LEVEL actúan en
+hardware; mezcla física de MIXING pendiente de prueba auditiva. El Tap FX
+independiente sigue pendiente, no se sustituyó por cambios de BPM/velocidad del
+deck. Ver AUDIO-Y-SECCION-CENTRAL.md.
+
 Revisión estática: 6 de noviembre de 2026. Respaldo anterior a esta comparación:
 **04a0a21**. Incluye la corrección de FX, pruebas y los dos manuales locales.
 Esta revisión no modifica las asignaciones ni el mapeo instalado.

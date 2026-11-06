@@ -93,6 +93,7 @@ const dj = context.DJ202;
 setValue('[Master]', 'num_samplers', 16);
 setValue('[App]', 'num_samplers', 16);
 dj.init();
+assert.equal(getValue('[Master]', 'headMix'), -1);
 const press = (button, value, group = button.group) =>
   button.input(0, button.midi?.[1] || 0, value, 0x90, group);
 const left = dj.leftDeck;
@@ -502,6 +503,39 @@ for (const deck of [1, 2, 3, 4]) {
 left.setCurrentDeck('[Channel1]');
 right.setCurrentDeck('[Channel2]');
 
+// Center sampler controls: volume instead of trim, coherent PFL and live LED.
+for (const [midiValue, expected] of [[0, 0], [64, 0.5], [127, 1]]) {
+  writes.length = 0;
+  dj.sampler.level.input(0, 0x1a, midiValue, 0xbf, '[Master]');
+  assert.equal(writes.length, 16);
+  for (let sampler = 1; sampler <= 16; sampler++) {
+    assert.equal(getValue(`[Sampler${sampler}]`, 'volume'), expected);
+  }
+  assert.ok(writes.every(w => w[1] === 'volume'));
+}
+for (let sampler = 1; sampler <= 16; sampler++) setValue(`[Sampler${sampler}]`, 'pfl', 0);
+setValue('[Sampler1]', 'pfl', 1);
+messages.length = 0;
+setValue('[Sampler3]', 'pfl', 1);
+assert.ok(messages.some(m => m[0] === 0x9f && m[1] === 0x1d && m[2] === 127));
+writes.length = 0;
+dj.sampler.reconnectComponents();
+assert.ok(writes.every(w => w[1] !== 'pfl')); // Mode switches must not reset monitoring.
+assert.equal(getValue('[Sampler1]', 'pfl'), 1);
+press(dj.sampler.pfl, 127); press(dj.sampler.pfl, 0);
+for (let sampler = 1; sampler <= 16; sampler++) assert.equal(getValue(`[Sampler${sampler}]`, 'pfl'), 0);
+press(dj.sampler.pfl, 127); press(dj.sampler.pfl, 0);
+for (let sampler = 1; sampler <= 16; sampler++) assert.equal(getValue(`[Sampler${sampler}]`, 'pfl'), 1);
+messages.length = 0;
+for (let sampler = 1; sampler <= 16; sampler++) setValue(`[Sampler${sampler}]`, 'pfl', 0);
+assert.equal(messages.at(-1)[2], 0);
+dj.bindSamplerControls = false;
+writes.length = 0;
+dj.sampler.level.input(0, 0x1a, 127, 0xbf, '[Master]');
+press(dj.sampler.pfl, 127); press(dj.sampler.pfl, 0);
+assert.equal(writes.length, 0);
+dj.bindSamplerControls = true;
+
 // No mapping-owned callbacks survive shutdown, including active FX flashing.
 fx.flash();
 press(left.sync, 127);
@@ -514,7 +548,10 @@ assert.equal(getValue('[Channel1]', 'hotcue_1_activate'), 0);
 assert.equal(timers.size, 0);
 assert.equal(connections.size, 0);
 advance(2000);
+dj.hardwareHeadphoneMixing = false;
+setValue('[Master]', 'headMix', 0.25);
 dj.init();
+assert.equal(getValue('[Master]', 'headMix'), 0.25);
 dj.shutdown();
 assert.equal(timers.size, 0);
 assert.equal(connections.size, 0);

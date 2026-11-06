@@ -1,5 +1,12 @@
 # Roland DJ-202 para Mixxx
 
+## Sección central y audio
+
+Ver [AUDIO-Y-SECCION-CENTRAL.md](AUDIO-Y-SECCION-CENTRAL.md): perfil WASAPI para
+parlantes del PC y auriculares DJ-202, diagnóstico de controles físicos,
+volumen/PFL del sampler corregidos y estado pendiente del Tap FX independiente.
+Antes de estos cambios se guardó Pitch Play en `696a2b4`.
+
 ## Pitch Play
 
 HOT CUE dos veces selecciona Pitch Play. Parameter recorre tres rangos de notas;

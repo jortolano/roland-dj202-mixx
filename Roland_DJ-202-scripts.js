@@ -56,6 +56,7 @@ DJ202.slicerBeatsWindow = 8;
 DJ202.autoFocusEffects = false;
 DJ202.autoShowFourDecks = false;
 DJ202.bindSamplerControls = true;
+DJ202.hardwareHeadphoneMixing = true;
 
 function debug() {
   var output = "";
@@ -70,6 +71,10 @@ function debug() {
 ///////////
 
 DJ202.init = function() {
+  if (DJ202.hardwareHeadphoneMixing) {
+    // Send cue-only to the controller; its MIXING knob blends the program feed.
+    engine.setValue('[Master]', 'headMix', -1);
+  }
   DJ202.shiftButton = function(channel, control, value, status, group) {
     DJ202.deck.concat(DJ202.effectUnit, DJ202.sampler)
         .forEach(value ? function(module) { module.shift(); }
@@ -81,6 +86,9 @@ DJ202.init = function() {
   DJ202.rightDeck = new DJ202.Deck([ 2, 4 ], 1);
   DJ202.deck = [ DJ202.leftDeck, DJ202.rightDeck ];
 
+  if (engine.getValue('[App]', 'num_samplers') < 16) {
+    engine.setValue('[App]', 'num_samplers', 16);
+  }
   DJ202.sampler = new DJ202.Sampler();
   DJ202.sampler.reconnectComponents();
 
@@ -92,10 +100,6 @@ DJ202.init = function() {
   DJ202.makeConnection('[Channel4]', 'track_loaded', DJ202.autoShowDecks);
   for (var deck = 1; deck <= 4; deck++) {
     DJ202.makeConnection('[Channel' + deck + ']', 'track_loaded', DJ202.pitchPlayTrackChanged);
-  }
-
-  if (engine.getValue('[Master]', 'num_samplers') < 16) {
-    engine.setValue('[Master]', 'num_samplers', 16);
   }
 
   DJ202.leftDeck.setCurrentDeck('[Channel1]');
@@ -597,18 +601,13 @@ DJ202.Sampler = function() {
   }
 
   this.level = new components.Pot({
-    inValueScale : function(value) {
-      // FIXME: The sampler gain knob has a dead zone and appears to
-      // scale non-linearly.
-      return components.Pot.prototype.inValueScale.call(this, value) * 4;
-    },
     input : function(channel, control, value, status, group) {
       if (!DJ202.bindSamplerControls) {
         return
       }
       for (var i = 1; i <= 16; i++) {
         var group = '[Sampler' + i + ']';
-        engine.setValue(group, 'pregain', this.inValueScale(value));
+        engine.setParameter(group, 'volume', this.inValueScale(value));
       }
     }
   });
@@ -620,22 +619,38 @@ DJ202.Sampler = function() {
       if (!DJ202.bindSamplerControls) {
         return
       }
-      components.Button.prototype.connect.call(this);
-      // Ensure a consistent state between mixxx and device.
+      this.connections = [];
       for (var i = 1; i <= 16; i++) {
         var group = '[Sampler' + i + ']';
-        engine.setValue(group, 'pfl', false);
+        this.connections.push(DJ202.makeConnection(group, 'pfl', this.output.bind(this)));
       }
-      this.send(0);
+      this.trigger();
+    },
+    trigger : function() { this.output(); },
+    output : function() {
+      var anyEnabled = false;
+      for (var i = 1; i <= 16; i++) {
+        anyEnabled = anyEnabled || Boolean(engine.getValue('[Sampler' + i + ']', 'pfl'));
+      }
+      this.send(DJ202.bindSamplerControls && anyEnabled ? 0x7f : 0);
     },
     input : function(channel, control, value, status, group) {
-      if (!value || !DJ202.bindSamplerControls) {
+      if (!DJ202.bindSamplerControls) {
         return;
+      }
+      if (!value) {
+        this.trigger();
+        return;
+      }
+      var anyEnabled = false;
+      for (var i = 1; i <= 16; i++) {
+        anyEnabled = anyEnabled || Boolean(engine.getValue('[Sampler' + i + ']', 'pfl'));
       }
       for (var i = 1; i <= 16; i++) {
         var group = '[Sampler' + i + ']';
-        script.toggleControl(group, 'pfl');
+        engine.setValue(group, 'pfl', anyEnabled ? 0 : 1);
       }
+      this.trigger();
     }
   });
 };

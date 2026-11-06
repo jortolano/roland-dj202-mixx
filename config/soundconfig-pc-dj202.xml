@@ -1,0 +1,12 @@
+<!DOCTYPE SoundManagerConfig>
+<SoundManagerConfig api="Windows WASAPI" deck_count="4" force_network_clock="0" latency="5" samplerate="48000" sync_buffers="2">
+ <SoundDevice name="Altavoces (2- USB Audio CODEC )" portAudioIndex="23">
+  <output channel="0" channel_count="2" index="0" type="Master"/>
+ </SoundDevice>
+ <SoundDevice name="CUE OUTPUT (DJ-202)" portAudioIndex="21">
+  <output channel="0" channel_count="2" index="0" type="Headphones"/>
+ </SoundDevice>
+ <SoundDevice name="MASTER OUTPUT (DJ-202)" portAudioIndex="22">
+  <output channel="0" channel_count="2" index="0" type="Booth"/>
+ </SoundDevice>
+</SoundManagerConfig>
