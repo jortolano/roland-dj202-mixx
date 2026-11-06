@@ -3,7 +3,7 @@
 Actualización posterior a la revisión: se corrigieron los enlaces de contexto
 de temporizadores y conexiones de LEDs, el parpadeo FX y la limpieza de recursos.
 Ver README y `test-callbacks.cjs`. Las filas siguientes conservan el diagnóstico
-del respaldo `04a0a21`; las asignaciones siguen siendo las mismas.
+del respaldo `d588bdd`; las asignaciones siguen siendo las mismas.
 
 Actualización pads/loops: borrado de hotcue sin recreación, Cue Loop nativo con
 alternancia y Shift para relanzar, salida del loop sin detener playback y LEDs
@@ -33,7 +33,7 @@ rearme de toma suave/lecturas de 14 bits. Shift + tempo conserva su función
 propia de transposición, no adopta el clutch de Serato. Ver GESTOS-CUSTOM.md.
 
 Revisión estática: 6 de noviembre de 2026. Respaldo anterior a esta comparación:
-**04a0a21**. Incluye la corrección de FX, pruebas y los dos manuales locales.
+**d588bdd**. Incluye la corrección de FX, pruebas y los dos manuales locales.
 Esta revisión no modifica las asignaciones ni el mapeo instalado.
 
 ## Qué pudimos consultar

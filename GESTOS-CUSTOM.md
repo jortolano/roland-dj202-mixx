@@ -43,7 +43,7 @@ La pulsación larga produce un parpadeo breve; al terminar vuelve el LED al
 estado de la capa actual (efecto activado, o enrutamiento si Shift está pulsado).
 El LED no queda encendido permanentemente para indicar foco.
 
-**Cambio respecto a la versión confirmada `b6daac3`:** Shift + toque corto FX
+**Cambio respecto a la versión confirmada `27d7091`:** Shift + toque corto FX
 aplica el enrutamiento al **soltar**, antes lo aplicaba al pulsar. Es necesario
 esperar para distinguir un toque corto de la nueva acción de mantener.
 El umbral es configurable en la biblioteca y no debe asumirse idéntico en
@@ -152,7 +152,7 @@ de Slip/loop, cambio de modo/deck con pads mantenidos, descarga de pista y
 aislamiento del sampler con Shift. Simula las operaciones nativas de loop y
 no sustituye una prueba de audio en Mixxx.
 
-Respaldo antes de estos cambios: `a0d7a18` (pads y loops confirmados).
+Respaldo antes de estos cambios: `53ffaed` (pads y loops confirmados).
 
 ## Pitch Play
 
@@ -220,7 +220,7 @@ Las pruebas automatizadas usan los componentes reales de Mixxx y motor simulado:
 ocho notas en tres rangos/cuatro decks, selección con Shift, pads vacíos,
 liberación, superposición, cambios de modo/deck/pista y apagado del mapeo.
 Pendiente validar sonido y selección física con la consola.
-Respaldo antes de Pitch Play: `5b0ef05` (Slicer/Slicer Loop confirmados).
+Respaldo antes de Pitch Play: `0005154` (Slicer/Slicer Loop confirmados).
 
 Fuentes: [guía Serato DJ-202](https://support.serato.com/hc/en-us/articles/10173607099919-Roland-DJ-202-Quickstart-Guide),
 [controles Mixxx 2.5](https://manual.mixxx.org/2.5/en/chapters/appendix/mixxx_controls)
@@ -269,7 +269,7 @@ decodificación de 14 bits y registro de toma suave en los cuatro decks.
 El motor simulado registra los parámetros normalizados del fader; **no valida
 la curva ni el algoritmo nativo de toma suave**, que requieren la prueba física.
 También se comprobó que ya no hay mensajes MIDI duplicados en el XML.
-Respaldo anterior: `f759a3a` (audio y preescucha confirmados).
+Respaldo anterior: `8e27c0e` (audio y preescucha confirmados).
 
 ## Otras diferencias ya existentes
 

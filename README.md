@@ -1,5 +1,8 @@
 # Roland DJ-202 para Mixxx
 
+La identidad de Git se corrigió a la cuenta personal `jortolano`. Ver
+[HISTORIAL.md](HISTORIAL.md) para equivalencias de hashes y respaldos locales.
+
 ## Jogs y tempo
 
 Scratch se libera con Shift, cambio de deck y descarga de pista. La búsqueda
@@ -8,14 +11,14 @@ con Shift se limita a 0–100% y requiere duración válida. Shift + tempo usa
 Se descartan bytes MIDI de 14 bits anteriores al cambiar de deck y se eliminó
 una entrada duplicada del fader derecho (355 entradas MIDI únicas actuales).
 Pruebas de script pasadas; falta prueba física de sensibilidad y toma suave.
-Detalles en [GESTOS-CUSTOM.md](GESTOS-CUSTOM.md). Respaldo: `f759a3a`.
+Detalles en [GESTOS-CUSTOM.md](GESTOS-CUSTOM.md). Respaldo: `8e27c0e`.
 
 ## Sección central y audio
 
 Ver [AUDIO-Y-SECCION-CENTRAL.md](AUDIO-Y-SECCION-CENTRAL.md): perfil WASAPI para
 parlantes del PC y auriculares DJ-202, diagnóstico de controles físicos,
 volumen/PFL del sampler corregidos y estado pendiente del Tap FX independiente.
-Antes de estos cambios se guardó Pitch Play en `696a2b4`.
+Antes de estos cambios se guardó Pitch Play en `50fd3e1`.
 
 ## Pitch Play
 
@@ -24,7 +27,7 @@ Shift + pad selecciona un cue existente. Las notas usan transposición de Mixxx
 sin depender de la tonalidad analizada y restauran el ajuste previo al liberar
 el pad o cambiar de modo/deck. Gestos y tabla de notas en
 [GESTOS-CUSTOM.md](GESTOS-CUSTOM.md). Pruebas automatizadas pasadas en cuatro
-decks; pendiente prueba física/audio. Respaldo anterior: `5b0ef05`.
+decks; pendiente prueba física/audio. Respaldo anterior: `0005154`.
 
 ## Slicer
 
@@ -34,7 +37,7 @@ Parameter cambia repetición y Shift + Parameter cambia ventana, con ajustes por
 deck. Se restauran Slip y posiciones del loop al salir o cambiar de deck.
 La aproximación actual requiere tempo estable y beatgrid: los límites y gestos
 están en [GESTOS-CUSTOM.md](GESTOS-CUSTOM.md). Pruebas de script en cuatro decks
-pasadas; falta prueba física y de audio. Respaldo anterior: `a0d7a18`.
+pasadas; falta prueba física y de audio. Respaldo anterior: `53ffaed`.
 
 ## Pads y loops
 
@@ -43,7 +46,7 @@ controles nativos de Mixxx (toque alterna, Shift relanza), Loop Exit deja
 la pista reproduciendo y los LEDs de Loop In/Out envían valores MIDI válidos.
 El XML requiere ahora Mixxx 2.4+. Detalles y cambios de gestos en
 [GESTOS-CUSTOM.md](GESTOS-CUSTOM.md). `test-callbacks.cjs` cubre los cuatro decks;
-falta validación física de esta actualización. Respaldo previo: `b65448e`.
+falta validación física de esta actualización. Respaldo previo: `19257f8`.
 
 Los gestos propios, su procedencia y sus diferencias respecto a Serato están
 documentados en [GESTOS-CUSTOM.md](GESTOS-CUSTOM.md). Incluye la nueva acción
@@ -82,7 +85,7 @@ Pendiente confirmar el movimiento con el hardware.
 Este repositorio contiene un mapeo XML con 356 entradas y un script JavaScript,
 orientados a cuatro decks. El XML declara Mixxx 2.1.0+; esto no certifica su
 compatibilidad completa con versiones posteriores. El único commit local es
-`9932ccb`, del 10 de noviembre de 2025.
+`9d3d33d`, del 10 de noviembre de 2025.
 
 La instalación local examinada es **Mixxx 2.5.6 x64**, en `D:\Mixx`.
 Incluye el mapeo DJ-505, pero no el DJ-202. Las dependencias del XML,

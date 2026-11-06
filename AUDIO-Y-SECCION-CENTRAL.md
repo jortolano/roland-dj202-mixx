@@ -2,7 +2,7 @@
 
 Revisión del 6 de noviembre de 2026. Configuración indicada por el usuario:
 **parlantes del PC y auriculares en la DJ-202**. Respaldo previo del mapeo:
-`696a2b4` (Pitch Play). La configuración anterior de audio era FL Studio ASIO,
+`50fd3e1` (Pitch Play). La configuración anterior de audio era FL Studio ASIO,
 con una sola salida Master y ninguna de auriculares.
 
 ## Controles físicos y MIDI
