@@ -1,5 +1,14 @@
 # Roland DJ-202 para Mixxx
 
+## Pitch Play
+
+HOT CUE dos veces selecciona Pitch Play. Parameter recorre tres rangos de notas;
+Shift + pad selecciona un cue existente. Las notas usan transposición de Mixxx
+sin depender de la tonalidad analizada y restauran el ajuste previo al liberar
+el pad o cambiar de modo/deck. Gestos y tabla de notas en
+[GESTOS-CUSTOM.md](GESTOS-CUSTOM.md). Pruebas automatizadas pasadas en cuatro
+decks; pendiente prueba física/audio. Respaldo anterior: `5b0ef05`.
+
 ## Slicer
 
 Se corrigieron los ocho índices de pad, los LEDs y el aislamiento respecto al

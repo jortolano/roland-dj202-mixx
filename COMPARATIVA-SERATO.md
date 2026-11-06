@@ -15,6 +15,12 @@ los ocho pads corregida, ventana fija nativa en Slicer Loop y limpieza al cambia
 modo/deck. La temporización sigue siendo una aproximación para tempo estable;
 no se afirma paridad con Serato. Ver GESTOS-CUSTOM.md para límites y pruebas.
 
+Actualización Pitch Play: tres rangos de notas con Parameter, selección de cue
+con Shift, uso de `pitch_adjust` sin requerir análisis tonal y restauración del
+ajuste anterior al liberar/salir. Los pads vacíos no crean cues; Shift + Parameter
+repite la selección de rango. Son decisiones propias documentadas; la matriz
+siguiente conserva el diagnóstico inicial y no describe estas correcciones.
+
 Revisión estática: 6 de noviembre de 2026. Respaldo anterior a esta comparación:
 **04a0a21**. Incluye la corrección de FX, pruebas y los dos manuales locales.
 Esta revisión no modifica las asignaciones ni el mapeo instalado.

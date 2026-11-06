@@ -77,6 +77,9 @@ const context = vm.createContext({
   midi: { sendShortMsg(...args) { messages.push(args); }, sendSysexMsg() {} },
   bpm: {tapButton() {}},
   script: {
+    channelRegEx: /^\[Channel(\d+)\]$/,
+    eqRegEx: /^\[EqualizerRack1_(\[.*\])_Effect1\]$/,
+    quickEffectRegEx: /^\[QuickEffectRack1_(\[.*\])\]$/,
     deckFromGroup(g) { return Number(g.match(/\d+/)[0]); },
     toggleControl(g, k) { setValue(g, k, !getValue(g, k)); },
     triggerControl(g, k) { setValue(g, k, 1); setValue(g, k, 0); }
@@ -397,10 +400,117 @@ for (const deck of [1, 2, 3, 4]) {
 left.setCurrentDeck('[Channel1]');
 right.setCurrentDeck('[Channel2]');
 
+// Pitch Play: the full keyboard, existing-cue selection and stable modifiers.
+const expectedRanges = [
+  [-3, -2, -1, 0, -7, -6, -5, -4],
+  [0, 1, 2, 3, -4, -3, -2, -1],
+  [4, 5, 6, 7, 0, 1, 2, 3]
+];
+for (const deck of [1, 2, 3, 4]) {
+  const side = deck % 2 ? left : right;
+  const group = `[Channel${deck}]`;
+  side.setCurrentDeck(group);
+  const pads = side.padSection;
+  setValue(group, 'track_loaded', 0);
+  for (let cue = 1; cue <= 8; cue++) setValue(group, `hotcue_${cue}_enabled`, 0);
+  setValue(group, 'track_loaded', 1);
+  pads.setState(0, 0, 2, 0, group);
+  const state = dj.getPitchPlayState(group);
+  assert.equal(state.range, 1);
+  assert.equal(state.cue, -1);
+  writes.length = 0;
+  press(pads.hotcueButton[1], 127, group); press(pads.hotcueButton[1], 0, group);
+  assert.equal(writes.length, 0); // Empty mode never creates a cue.
+  setValue(group, 'hotcue_1_enabled', 1);
+  assert.equal(state.cue, 1);
+  setValue(group, 'file_key', 0); // Transposition must work without key analysis.
+  const parameter = (note) => {
+    pads.paramPlusMinus.input(0, note, 127, 0x94, group);
+    pads.paramPlusMinus.input(0, note, 0, 0x94, group);
+  };
+  parameter(0x43); // Middle -> down.
+  assert.equal(state.range, 0);
+  for (const range of [0, 1, 2]) {
+    if (range) parameter(0x44);
+    assert.equal(state.range, range);
+    for (let pad = 1; pad <= 8; pad++) {
+      setValue(group, 'pitch_adjust', 0.75);
+      writes.length = 0;
+      press(pads.hotcueButton[pad], 127, group);
+      assert.equal(getValue(group, 'pitch_adjust'), expectedRanges[range][pad - 1]);
+      assert.equal(getValue(group, 'hotcue_1_activate'), 1);
+      assert.ok(writes.every(w => w[1] !== 'key' && w[1] !== 'file_key'));
+      press(pads.hotcueButton[pad], 0, group);
+      assert.equal(getValue(group, 'hotcue_1_activate'), 0);
+      assert.equal(getValue(group, 'pitch_adjust'), 0.75);
+    }
+    messages.length = 0;
+    dj.refreshPitchPlay(group);
+    const root = expectedRanges[range].indexOf(0) + 1;
+    assert.ok(messages.some(m => m[0] === 0x94 + deck - 1 && m[1] === root && m[2] === 127));
+  }
+  parameter(0x44); assert.equal(state.range, 2); // Clamp at high range.
+  parameter(0x4b); assert.equal(state.range, 1); // Shift also changes range.
+  pads.paramPlusMinus.input(0, 0x43, 127, 0x94, group);
+  pads.paramPlusMinus.input(0, 0x44, 127, 0x94, group);
+  assert.equal(state.range, 1); // Both Parameter buttons restore the middle range.
+  pads.paramPlusMinus.input(0, 0x43, 0, 0x94, group);
+  pads.paramPlusMinus.input(0, 0x44, 0, 0x94, group);
+
+  setValue(group, 'hotcue_4_enabled', 1);
+  dj.shiftButton(0, 0, 127, 0, '');
+  writes.length = 0;
+  press(pads.hotcueButton[4], 127, group);
+  assert.equal(state.cue, 4);
+  dj.shiftButton(0, 0, 0, 0, '');
+  press(pads.hotcueButton[4], 0, group);
+  assert.ok(writes.every(w => !w[1].includes('hotcue_'))); // Selection never plays/deletes.
+  dj.shiftButton(0, 0, 127, 0, '');
+  press(pads.hotcueButton[8], 127, group); press(pads.hotcueButton[8], 0, group);
+  assert.equal(state.cue, 4); // Empty selection is ignored.
+  dj.shiftButton(0, 0, 0, 0, '');
+
+  press(pads.hotcueButton[2], 127, group);
+  press(pads.hotcueButton[3], 127, group);
+  press(pads.hotcueButton[2], 0, group);
+  assert.equal(getValue(group, 'pitch_adjust'), 2); // Old release must not end latest note.
+  dj.shiftButton(0, 0, 127, 0, '');
+  press(pads.hotcueButton[3], 0, group);
+  assert.equal(getValue(group, 'pitch_adjust'), 0.75);
+  assert.equal(getValue(group, 'hotcue_4_activate'), 0);
+  dj.shiftButton(0, 0, 0, 0, '');
+
+  press(pads.hotcueButton[3], 127, group);
+  pads.setState(0, 0, 0, 0, group);
+  assert.equal(getValue(group, 'pitch_adjust'), 0.75);
+  press(pads.hotcueButton[3], 0, group);
+  pads.setState(0, 0, 2, 0, group);
+  press(pads.hotcueButton[3], 127, group);
+  side.setCurrentDeck(`[Channel${deck <= 2 ? deck + 2 : deck - 2}]`);
+  assert.equal(getValue(group, 'pitch_adjust'), 0.75);
+  press(pads.hotcueButton[3], 0);
+  side.setCurrentDeck(group);
+  press(pads.hotcueButton[3], 127, group);
+  setValue(group, 'track_loaded', 0);
+  setValue(group, 'pitch_adjust', 0); // Mixxx resets this on a new track.
+  setValue(group, 'track_loaded', 1);
+  press(pads.hotcueButton[3], 0, group);
+  assert.equal(state.range, 1);
+  assert.equal(getValue(group, 'pitch_adjust'), 0);
+  pads.setState(0, 0, 0, 0, group);
+}
+left.setCurrentDeck('[Channel1]');
+right.setCurrentDeck('[Channel2]');
+
 // No mapping-owned callbacks survive shutdown, including active FX flashing.
 fx.flash();
 press(left.sync, 127);
+left.padSection.setState(0, 0, 2, 0, '[Channel1]');
+setValue('[Channel1]', 'pitch_adjust', 0.5);
+press(left.padSection.hotcueButton[3], 127, '[Channel1]');
 dj.shutdown();
+assert.equal(getValue('[Channel1]', 'pitch_adjust'), 0.5);
+assert.equal(getValue('[Channel1]', 'hotcue_1_activate'), 0);
 assert.equal(timers.size, 0);
 assert.equal(connections.size, 0);
 advance(2000);

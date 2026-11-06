@@ -74,6 +74,7 @@ DJ202.init = function() {
     DJ202.deck.concat(DJ202.effectUnit, DJ202.sampler)
         .forEach(value ? function(module) { module.shift(); }
                        : function(module) { module.unshift(); });
+    DJ202.deck.forEach(function(deck) { DJ202.refreshPitchPlay(deck.currentDeck); });
   };
 
   DJ202.leftDeck = new DJ202.Deck([ 1, 3 ], 0);
@@ -89,6 +90,9 @@ DJ202.init = function() {
 
   DJ202.makeConnection('[Channel3]', 'track_loaded', DJ202.autoShowDecks);
   DJ202.makeConnection('[Channel4]', 'track_loaded', DJ202.autoShowDecks);
+  for (var deck = 1; deck <= 4; deck++) {
+    DJ202.makeConnection('[Channel' + deck + ']', 'track_loaded', DJ202.pitchPlayTrackChanged);
+  }
 
   if (engine.getValue('[Master]', 'num_samplers') < 16) {
     engine.setValue('[Master]', 'num_samplers', 16);
@@ -113,6 +117,9 @@ DJ202.autoShowDecks = function(value, group, control) {
 };
 
 DJ202.shutdown = function() {
+  Object.keys(DJ202.pitchPlayStates).forEach(function(deck) {
+    DJ202.stopPitchPlay('[Channel' + deck + ']');
+  });
   Object.keys(DJ202.slicerStates).forEach(function(deck) {
     DJ202.stopSlicer('[Channel' + deck + ']');
   });
@@ -420,11 +427,13 @@ DJ202.Deck = function(deckNumbers, offset) {
   this.setCurrentDeck = function(deck) {
     if (this.currentDeck && this.currentDeck !== deck) {
       DJ202.stopSlicer(this.currentDeck);
+      DJ202.stopPitchPlay(this.currentDeck);
     }
     components.Deck.prototype.setCurrentDeck.call(this, deck);
     DJ202.effectUnit[offset + 1].focusedDeck = script.deckFromGroup(deck);
     DJ202.effectUnit[offset + 1].reconnect();
     DJ202.connectSlicer(deck, this.padSection.mode);
+    DJ202.connectPitchPlay(deck, this.padSection.mode);
   }
 };
 
@@ -914,6 +923,14 @@ DJ202.HotcueButton.prototype.connect = function() {
   components.HotcueButton.prototype.connect.call(this);
 };
 
+DJ202.HotcueButton.prototype.output = function() {
+  if (this.pad.mode === DJ202.PadMode.PITCHPLAY) {
+    DJ202.refreshPitchPlay(this.group);
+    return;
+  }
+  components.HotcueButton.prototype.output.apply(this, arguments);
+};
+
 DJ202.HotcueButton.prototype.unshift = function() {
   this.inKey = 'hotcue_' + this.number + '_activate';
   this.input = function(channel, control, value, status, group) {
@@ -922,19 +939,8 @@ DJ202.HotcueButton.prototype.unshift = function() {
       this.heldHotcueGroup = null;
       return;
     }
-    if (this.pad.mode === DJ202.PadMode.PITCHPLAY) {
-      if (value > 0 && this.pad.pitchplayCue > 0) {
-        var fileKey = engine.getValue(group, 'file_key');
-        var keyModifier = 0;
-        if (this.number <= 4) {
-          keyModifier = this.number - 1;
-        } else {
-          keyModifier = this.number - 9;
-        }
-        engine.setValue(this.group, 'key', fileKey + keyModifier);
-        script.triggerControl(this.group,
-                              'hotcue_' + this.pad.pitchplayCue + '_activate');
-      }
+    if (DJ202.pitchPlayInput(this, value, false)) {
+      return;
     } else if (this.pad.mode === DJ202.PadMode.CUELOOP) {
       if (value && engine.getValue(this.group, 'track_loaded')) {
         engine.setValue(this.group, 'beatloop_size', DJ202.cueLoopLength);
@@ -956,12 +962,11 @@ DJ202.HotcueButton.prototype.shift = function() {
       this.heldHotcueGroup = null;
       return;
     }
-    if (!value) {
+    if (!value && !this.pitchPlayPress) {
       return;
     }
-    if (this.pad.mode === DJ202.PadMode.PITCHPLAY) {
-      this.pad.pitchplayCue = this.number;
-      this.pad.setHotcueLED(this.number);
+    if (DJ202.pitchPlayInput(this, value, true)) {
+      return;
     } else if (this.pad.mode === DJ202.PadMode.CUELOOP) {
       if (engine.getValue(this.group, 'track_loaded')) {
         engine.setValue(this.group, 'beatloop_size', DJ202.cueLoopLength);
@@ -1215,10 +1220,18 @@ DJ202.ParamButtons.prototype.input = function(channel, control, value, status,
   if (!value) {
     // Work-around LED self-reset on release.
     this.trigger();
+    DJ202.refreshPitchPlay(group);
     return
   }
 
   var side = deck % 2 ? DJ202.leftDeck : DJ202.rightDeck;
+  if (side.padSection.mode === DJ202.PadMode.PITCHPLAY) {
+    var pitchState = DJ202.getPitchPlayState(group);
+    pitchState.range = this.active.every(Boolean) ? 1 :
+        Math.max(0, Math.min(2, pitchState.range + (isPlus ? 1 : -1)));
+    DJ202.refreshPitchPlay(group);
+    return;
+  }
   if (side.padSection.mode === DJ202.PadMode.SLICER ||
       side.padSection.mode === DJ202.PadMode.SLICERLOOP) {
     var settings = DJ202.getSlicerSettings(deck);
@@ -1272,6 +1285,162 @@ DJ202.ParamButtons.prototype.input = function(channel, control, value, status,
                     isPlus ? beatjumpSize * 2 : beatjumpSize / 2);
     break;
   }
+};
+
+///////////////////////////////////////////////////////////////////////////////
+// PITCH PLAY
+DJ202.pitchPlayStates = {};
+// Pads 1..4 are the top row, 5..8 the bottom row. Down, middle, up.
+DJ202.pitchPlayRanges = [
+  [-3, -2, -1, 0, -7, -6, -5, -4],
+  [0, 1, 2, 3, -4, -3, -2, -1],
+  [4, 5, 6, 7, 0, 1, 2, 3]
+];
+
+DJ202.getPitchPlayState = function(group) {
+  var deck = script.deckFromGroup(group);
+  if (!DJ202.pitchPlayStates[deck]) {
+    DJ202.pitchPlayStates[deck] = {range : 1, cue : -1, held : null, connections : [], active : false};
+  }
+  return DJ202.pitchPlayStates[deck];
+};
+
+DJ202.findPitchPlayCue = function(group, state) {
+  if (state.cue > 0 && engine.getValue(group, 'hotcue_' + state.cue + '_enabled')) {
+    return;
+  }
+  state.cue = -1;
+  for (var cue = 1; cue <= 8; cue++) {
+    if (engine.getValue(group, 'hotcue_' + cue + '_enabled')) {
+      state.cue = cue;
+      break;
+    }
+  }
+};
+
+DJ202.releasePitchPlay = function(group, restore) {
+  var state = DJ202.getPitchPlayState(group);
+  if (state.held) {
+    var held = state.held;
+    state.held = null;
+    engine.setValue(group, 'hotcue_' + held.cue + '_activate', 0);
+    if (restore && engine.getValue(group, 'track_loaded')) {
+      engine.setValue(group, 'pitch_adjust', held.previousPitch);
+    }
+  }
+};
+
+DJ202.stopPitchPlay = function(group) {
+  var state = DJ202.pitchPlayStates[script.deckFromGroup(group)];
+  if (!state || !state.active) {
+    return;
+  }
+  state.active = false;
+  DJ202.releasePitchPlay(group, true);
+  state.connections.forEach(function(connection) { connection.disconnect(); });
+  state.connections = [];
+};
+
+DJ202.pitchPlayTrackChanged = function(value, group) {
+  var state = DJ202.pitchPlayStates[script.deckFromGroup(group)];
+  if (!state) {
+    return;
+  }
+  DJ202.releasePitchPlay(group, false);
+  state.range = 1;
+  state.cue = -1;
+  if (value) {
+    DJ202.findPitchPlayCue(group, state);
+  }
+  DJ202.refreshPitchPlay(group);
+};
+
+DJ202.connectPitchPlay = function(group, mode) {
+  if (mode !== DJ202.PadMode.PITCHPLAY) {
+    return;
+  }
+  var state = DJ202.getPitchPlayState(group);
+  if (!state.active) {
+    state.active = true;
+    for (var cue = 1; cue <= 8; cue++) {
+      state.connections.push(DJ202.makeConnection(group, 'hotcue_' + cue + '_enabled', function() {
+        DJ202.findPitchPlayCue(group, state);
+        DJ202.refreshPitchPlay(group);
+      }));
+    }
+  }
+  DJ202.findPitchPlayCue(group, state);
+  DJ202.refreshPitchPlay(group);
+};
+
+DJ202.refreshPitchPlay = function(group) {
+  if (!group) {
+    return;
+  }
+  var deck = script.deckFromGroup(group);
+  var state = DJ202.pitchPlayStates[deck];
+  var side = deck % 2 ? DJ202.leftDeck : DJ202.rightDeck;
+  if (!state || !state.active || !side || side.currentDeck !== group ||
+      side.padSection.mode !== DJ202.PadMode.PITCHPLAY) {
+    return;
+  }
+  var offsets = DJ202.pitchPlayRanges[state.range];
+  var channel = 0x94 + deck - 1;
+  var loaded = engine.getValue(group, 'track_loaded');
+  var usable = loaded && state.cue > 0;
+  for (var pad = 1; pad <= 8; pad++) {
+    var on = usable && (side.isShifted ? pad === state.cue :
+        offsets[pad - 1] === 0 || (state.held && state.held.pad === pad));
+    midi.sendShortMsg(channel, pad, on ? 0x7f : 0);
+    midi.sendShortMsg(channel, pad + 8, on ? 0x7f : 0);
+  }
+  [0x43, 0x4b].forEach(function(note) {
+    midi.sendShortMsg(channel, note, state.range > 0 ? 0x7f : 0);
+    midi.sendShortMsg(channel, note + 1, state.range < 2 ? 0x7f : 0);
+  });
+};
+
+DJ202.pitchPlayInput = function(button, value, shifted) {
+  var press = button.pitchPlayPress;
+  if (!value && press) {
+    button.pitchPlayPress = null;
+    var previousState = DJ202.getPitchPlayState(press.group);
+    if (!press.selection && previousState.held && previousState.held.pad === button.number) {
+      DJ202.releasePitchPlay(press.group, true);
+    }
+    DJ202.refreshPitchPlay(press.group);
+    return true;
+  }
+  if (button.pad.mode !== DJ202.PadMode.PITCHPLAY) {
+    return false;
+  }
+  if (!value || press) {
+    return true;
+  }
+  var group = button.group;
+  var state = DJ202.getPitchPlayState(group);
+  button.pitchPlayPress = {group : group, selection : shifted};
+  if (!state.active || !engine.getValue(group, 'track_loaded')) {
+    return true;
+  }
+  if (shifted) {
+    // Selecting an empty slot must not create a cue in the middle of a performance.
+    if (engine.getValue(group, 'hotcue_' + button.number + '_enabled')) {
+      state.cue = button.number;
+    }
+  } else {
+    DJ202.findPitchPlayCue(group, state);
+    if (state.cue < 1) {
+      return true;
+    }
+    var previousPitch = state.held ? state.held.previousPitch : engine.getValue(group, 'pitch_adjust');
+    DJ202.releasePitchPlay(group, false);
+    state.held = {pad : button.number, cue : state.cue, previousPitch : previousPitch};
+    engine.setValue(group, 'pitch_adjust', DJ202.pitchPlayRanges[state.range][button.number - 1]);
+    engine.setValue(group, 'hotcue_' + state.cue + '_activate', 1);
+  }
+  DJ202.refreshPitchPlay(group);
+  return true;
 };
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1550,6 +1719,7 @@ DJ202.PadSection.prototype =
 DJ202.PadSection.prototype.setState = function(channel, control, value, status,
                                                group) {
   DJ202.stopSlicer(group);
+  DJ202.stopPitchPlay(group);
 
   switch (value) {
   case 0x0:
@@ -1561,14 +1731,6 @@ DJ202.PadSection.prototype.setState = function(channel, control, value, status,
     break;
   case 0x2:
     this.mode = DJ202.PadMode.PITCHPLAY;
-    this.pitchplayCue = -1;
-    for (var i = 1; i <= 8; ++i) {
-      if (engine.getValue(group, 'hotcue_' + i + '_enabled')) {
-        this.pitchplayCue = i;
-        this.setHotcueLED(i);
-        break;
-      }
-    }
     break;
 
   case 0x10:
@@ -1602,8 +1764,6 @@ DJ202.PadSection.prototype.setState = function(channel, control, value, status,
   };
   this.reconnectComponents();
   DJ202.sampler.reconnectComponents();
-  if (this.mode === DJ202.PadMode.PITCHPLAY && this.pitchplayCue > 0) {
-    this.setHotcueLED(this.pitchplayCue);
-  }
   DJ202.connectSlicer(group, this.mode);
+  DJ202.connectPitchPlay(group, this.mode);
 };

@@ -154,6 +154,80 @@ no sustituye una prueba de audio en Mixxx.
 
 Respaldo antes de estos cambios: `a0d7a18` (pads y loops confirmados).
 
+## Pitch Play
+
+Para entrar, pulsar **HOT CUE dos veces, sin Shift**. Según el manual Roland
+(página 5), el botón parpadea rápido. HOT CUE una vez es Hotcue normal y
+Shift + HOT CUE es Cue Loop: son tres modos diferentes.
+
+Pitch Play reproduce un hotcue del deck con distintas transposiciones; no
+graba un fragmento ni carga un archivo en el sampler.
+
+| Gesto | Comportamiento actual | Procedencia |
+|---|---|---|
+| Mantener un pad | Reproducir el cue seleccionado con el intervalo del pad | Interpretación propia mediante `pitch_adjust` y `hotcue_X_activate` de Mixxx |
+| Soltar el último pad | Liberar la preescucha y restaurar el ajuste de tono previo | **Convención propia**; no se afirma que Serato restaure el tono así |
+| Shift + pad | Seleccionar un cue existente, sin dispararlo ni borrarlo | Selección comparable con Serato; el tratamiento de pads vacíos es propio |
+| Parameter − / + | Recorrer grave → medio → agudo, sin circular en los extremos | Rangos basados en la referencia Serato; recorrido limitado propio |
+| Shift + Parameter − / + | La misma selección de rango | Convención propia; no añade otra transposición |
+| Ambos Parameter | Volver al rango medio | Convención propia; no ejecuta `reset_key` en este modo |
+
+### Notas de los pads
+
+Valores en semitonos; los pads 1–4 son la fila superior y 5–8 la inferior.
+
+| Rango | Pad 1 | 2 | 3 | 4 | Pad 5 | 6 | 7 | 8 |
+|---|---|---|---|---|---|---|---|---|
+| Grave | −3 | −2 | −1 | **0** | −7 | −6 | −5 | −4 |
+| Medio (inicial) | **0** | +1 | +2 | +3 | −4 | −3 | −2 | −1 |
+| Agudo | +4 | +5 | +6 | +7 | **0** | +1 | +2 | +3 |
+
+Sin Shift se ilumina la nota de intervalo cero y, mientras se toca, el pad
+activo. Con Shift se ilumina el cue seleccionado. Los Parameter indican
+si queda un rango inferior o superior disponible.
+
+### Reglas y diferencias propias
+
+- Inicialmente se selecciona el primer cue existente. Shift sobre un pad vacío
+  no crea un cue ni cambia la selección; sin cues, los pads no disparan nada.
+  La guía Serato describe creación de cue vacío: **aquí se exige prepararlo
+  previamente en Hotcue**, para evitar creaciones accidentales.
+- Rango y selección se conservan por deck durante la sesión al cambiar de modo
+  o entre 1/3 y 2/4. Cargar otra pista reinicia al rango medio y primer cue disponible.
+- Se usa `pitch_adjust`, no la suma de `file_key` y un número de pad; funciona
+  también sin análisis de tonalidad. El intervalo se aplica respecto a la base
+  de tempo/keylock de Mixxx. Para comparar notas con tempo modificado, activar
+  Keylock antes de probar; el mapeo no cambia ese botón automáticamente.
+- Al soltar o salir del modo se restaura el `pitch_adjust` anterior al primer pad
+  mantenido. Si ya había reproducción normal, continúa; si era preescucha con
+  el deck detenido, Mixxx termina la preescucha al liberar el cue.
+- No hay acordes: el último pad pulsado domina. Soltar un pad anterior no cancela
+  la última nota. Cambiar Shift durante una pulsación no convierte su liberación
+  en borrado o selección de otro cue.
+- Cambiar de modo/deck o desactivar el mapeo libera la nota y restaura el ajuste.
+  Un cambio de pista descarta ese ajuste previo para no aplicarlo a la nueva.
+- Si el cue seleccionado es un loop guardado, `hotcue_X_activate` conserva el
+  comportamiento nativo de Mixxx y puede activar ese loop. Usar un hotcue normal
+  para la prueba básica de Pitch Play.
+
+Prueba rápida: crear un hotcue al comienzo de una voz, pausar, pulsar HOT CUE
+dos veces y mantener sucesivamente los pads 1, 2 y 3. En rango medio deberían
+sonar a 0, +1 y +2 semitonos mientras se mantienen. Parameter + lleva al rango
+agudo; el pad 5 pasa a ser la nota cero. Shift + otro pad con cue cambia la voz
+o el punto desde el que se toca.
+
+Las pruebas automatizadas usan los componentes reales de Mixxx y motor simulado:
+ocho notas en tres rangos/cuatro decks, selección con Shift, pads vacíos,
+liberación, superposición, cambios de modo/deck/pista y apagado del mapeo.
+Pendiente validar sonido y selección física con la consola.
+Respaldo antes de Pitch Play: `5b0ef05` (Slicer/Slicer Loop confirmados).
+
+Fuentes: [guía Serato DJ-202](https://support.serato.com/hc/en-us/articles/10173607099919-Roland-DJ-202-Quickstart-Guide),
+[controles Mixxx 2.5](https://manual.mixxx.org/2.5/en/chapters/appendix/mixxx_controls)
+y [control de tono de Mixxx 2.5](https://github.com/mixxxdj/mixxx/blob/2.5/src/engine/controls/keycontrol.cpp).
+El código de Mixxx permite valores fuera del rango nominal del dial al escribir
+`pitch_adjust`, empleado aquí para los extremos de ±7 semitonos.
+
 ## Otras diferencias ya existentes
 
 No se modifican en esta actualización. Son decisiones heredadas o adaptaciones
@@ -170,8 +244,7 @@ propias, no errores que deban sustituirse automáticamente por la función Serat
 - Keylock mantenido habilita ajuste de tono con Parameter; ambos Parameter
   reinician tono. Shift + Keylock recorre rangos de tempo 8%, 16% y 50%.
 - Parameter se usa para beatjump, desplazamiento/tamaño de loop y ajuste de tono.
-- Cue Loop usa dos beats por defecto; Pitch Play usa un rango fijo.
-  Slicer y sus límites se describen en la sección anterior.
+- Cue Loop usa dos beats por defecto. Pitch Play y Slicer se describen arriba.
 - El sampler usa dieciséis posiciones fijas; no replica bancos/salidas de Serato.
 
 Para estado de cobertura, límites y funciones aún ausentes, consultar la matriz.
