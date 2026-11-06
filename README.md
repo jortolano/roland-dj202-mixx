@@ -1,5 +1,22 @@
 # Roland DJ-202 para Mixxx
 
+## Corrección de callbacks y LEDs
+
+Se enlazaron los callbacks de Play, cambio de deck, FX, Sync, Slip y keylock
+con su componente. Sync, FX y ParamButtons conservan también su contexto al
+recibir actualizaciones de Mixxx. Los efectos refrescan sus LEDs al reconectar;
+el parpadeo vuelve al estado real y cancela una animación anterior.
+Los temporizadores y conexiones propios se registran y limpian en `shutdown`,
+junto con conexiones de componentes y scratch. No se cambiaron las asignaciones.
+
+Pruebas: `node test-callbacks.cjs [carpeta-de-controladores-de-Mixxx]` usa las
+bibliotecas reales instaladas (por defecto `D:/Mixx/controllers`) y simula el
+motor y MIDI. Comprueba pulsaciones cortas/largas y doble toque de Sync,
+Slip momentáneo, selección de FX, Play largo, cambio temporal de deck,
+keylock mantenido, feedback de ambos lados, desactivación y reinicialización.
+`node test-effects.cjs` conserva la regresión de la perilla FX.
+La prueba física de esta actualización sigue pendiente.
+
 ## Corrección de la perilla FX
 
 La perilla controla los tres metacontroles de su unidad cuando `focused_effect`
@@ -70,7 +87,7 @@ no demuestra una integración completa del secuenciador interno con Mixxx.
    sin declaración local. Falta documentar los gestos y revisar atribuciones/licencia
    antes de redistribuir: el XML atribuye el mapeo a Silvio Ankermann.
 
-No se cambió el mapeo durante esta revisión, para conservar un punto de comparación.
+La revisión inicial conservó el mapeo; las correcciones posteriores figuran arriba.
 
 ## Alternativas encontradas
 

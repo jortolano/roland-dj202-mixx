@@ -10,6 +10,41 @@
 
 var DJ202 = {};
 
+// Track only mapping-owned resources; Mixxx components manage their own connections.
+DJ202.timers = {};
+DJ202.connections = [];
+DJ202.beginTimer = function(interval, callback, oneShot) {
+  var id = engine.beginTimer(interval, function() {
+    if (oneShot) {
+      delete DJ202.timers[id];
+    }
+    callback();
+  }, oneShot);
+  DJ202.timers[id] = true;
+  return id;
+};
+DJ202.stopTimer = function(id) {
+  if (DJ202.timers[id]) {
+    engine.stopTimer(id);
+    delete DJ202.timers[id];
+  }
+};
+DJ202.makeConnection = function(group, key, callback) {
+  var nativeConnection = engine.makeConnection(group, key, callback);
+  var connection = {
+    trigger : function() { nativeConnection.trigger(); },
+    disconnect : function() {
+      var index = DJ202.connections.indexOf(connection);
+      if (index !== -1) {
+        DJ202.connections.splice(index, 1);
+        nativeConnection.disconnect();
+      }
+    }
+  };
+  DJ202.connections.push(connection);
+  return connection;
+};
+
 /////////////////
 // Tweakables. //
 /////////////////
@@ -52,8 +87,8 @@ DJ202.init = function() {
   DJ202.effectUnit[1] = new DJ202.EffectUnit(1);
   DJ202.effectUnit[2] = new DJ202.EffectUnit(2);
 
-  engine.makeConnection('[Channel3]', 'track_loaded', DJ202.autoShowDecks);
-  engine.makeConnection('[Channel4]', 'track_loaded', DJ202.autoShowDecks);
+  DJ202.makeConnection('[Channel3]', 'track_loaded', DJ202.autoShowDecks);
+  DJ202.makeConnection('[Channel4]', 'track_loaded', DJ202.autoShowDecks);
 
   if (engine.getValue('[Master]', 'num_samplers') < 16) {
     engine.setValue('[Master]', 'num_samplers', 16);
@@ -77,7 +112,19 @@ DJ202.autoShowDecks = function(value, group, control) {
   engine.setValue('[Master]', 'show_4decks', any_loaded);
 };
 
-DJ202.shutdown = function() {};
+DJ202.shutdown = function() {
+  Object.keys(DJ202.timers).forEach(function(id) { DJ202.stopTimer(Number(id)); });
+  DJ202.connections.slice().forEach(function(connection) { connection.disconnect(); });
+  (DJ202.deck || []).forEach(function(deck) {
+    deck.forEachComponent(function(component) { component.disconnect(); });
+  });
+  if (DJ202.sampler) {
+    DJ202.sampler.forEachComponent(function(component) { component.disconnect(); });
+  }
+  for (var deck = 1; deck <= 4; deck++) {
+    engine.scratchDisable(deck);
+  }
+};
 
 DJ202.browseEncoder = new components.Encoder({
   input : function(channel, control, value, status, group) {
@@ -224,8 +271,8 @@ DJ202.Deck = function(deckNumbers, offset) {
         if (value) { // Button press.
           this.longPressStart = new Date();
           this.longPressTimer =
-              engine.beginTimer(this.longPressTimeout,
-                                function() { this.longPressed = true; }, true);
+              DJ202.beginTimer(this.longPressTimeout,
+                                function() { this.longPressed = true; }.bind(this), true);
           return;
         } // Else: Button release.
 
@@ -256,7 +303,7 @@ DJ202.Deck = function(deckNumbers, offset) {
         script.toggleControl(group, 'play', !isPlaying);
 
         if (this.longPressTimer) {
-          engine.stopTimer(this.longPressTimer);
+          DJ202.stopTimer(this.longPressTimer);
           this.longPressTimer = null;
         }
       };
@@ -312,11 +359,11 @@ DJ202.Deck = function(deckNumbers, offset) {
         script.triggerControl(group, 'beats_translate_curpos');
         bpm.tapButton(script.deckFromGroup(group));
         this.longPressTimer =
-            engine.beginTimer(this.longPressTimeout, function() {
+            DJ202.beginTimer(this.longPressTimeout, function() {
               script.triggerControl(group, 'beats_translate_match_alignment');
             }, true);
       } else {
-        engine.stopTimer(this.longPressTimer);
+        DJ202.stopTimer(this.longPressTimer);
       }
     }
   });
@@ -338,14 +385,14 @@ DJ202.Deck = function(deckNumbers, offset) {
 
       if (value) { // Button press.
         this.longPressTimer =
-            engine.beginTimer(this.longPressTimeout,
-                              function() { this.isLongPressed = true }, true);
+            DJ202.beginTimer(this.longPressTimeout,
+                              function() { this.isLongPressed = true }.bind(this), true);
         this.deck.setCurrentDeck(otherDeck);
         return;
       } // Else: Button release.
 
       if (this.longPressTimer) {
-        engine.stopTimer(this.longPressTimer);
+        DJ202.stopTimer(this.longPressTimer);
         this.longPressTimer = null;
       }
 
@@ -438,7 +485,7 @@ DJ202.EffectUnit = function(unitNumber) {
     }
   });
 
-  this.knobSoftTakeoverHandler = engine.makeConnection(
+  this.knobSoftTakeoverHandler = DJ202.makeConnection(
       eu.group, 'focused_effect', function(value, group, control) {
         if (value === 0) {
           engine.softTakeoverIgnoreNextValue(eu.group, 'mix');
@@ -457,6 +504,7 @@ DJ202.EffectUnit.prototype.reconnect = function() {
   this.forEachComponent(function(component) {
     component.disconnect();
     component.connect();
+    component.trigger();
   });
 };
 
@@ -572,6 +620,10 @@ DJ202.FlashingButton = function() {
 DJ202.FlashingButton.prototype = Object.create(components.Button.prototype);
 
 DJ202.FlashingButton.prototype.flash = function(cycles) {
+  if (this.flashTimer) {
+    DJ202.stopTimer(this.flashTimer);
+    this.flashTimer = null;
+  }
   if (cycles == 0) {
     // Reset to correct value after flashing phase ends.
     this.trigger();
@@ -585,11 +637,10 @@ DJ202.FlashingButton.prototype.flash = function(cycles) {
   var value = cycles % 2 == 0 ? 0x7f : 0;
   this.send(value);
 
-  engine.beginTimer(this.flashFreq, function() {
-    var value = value ? 0 : 0x7f;
-    this.send(value);
+  this.flashTimer = DJ202.beginTimer(this.flashFreq, function() {
+    this.flashTimer = null;
     this.flash(cycles - 1);
-  }, true);
+  }.bind(this), true);
 };
 
 DJ202.EffectButton = function(effectUnit, effectNumber) {
@@ -624,8 +675,8 @@ DJ202.EffectButton.prototype.connect = function() {
        '_enable');
 
   this.connections = [
-    engine.makeConnection(this.effectGroup, 'enabled', this.output),
-    engine.makeConnection(this.routingGroup, this.routingControl, this.output)
+    DJ202.makeConnection(this.effectGroup, 'enabled', this.output.bind(this)),
+    DJ202.makeConnection(this.routingGroup, this.routingControl, this.output.bind(this))
   ];
 };
 
@@ -645,17 +696,17 @@ DJ202.EffectButton.prototype.unshift = function() {
     if (this.isPress(channel, control, value, status)) {
       this.isLongPressed = false;
       this.longPressTimer =
-          engine.beginTimer(this.longPressTimeout, function() {
+          DJ202.beginTimer(this.longPressTimeout, function() {
             engine.setValue(this.effectUnitGroup, 'focused_effect',
                             this.effectNumber);
             this.isLongPressed = true;
             this.flash();
-          }, true);
+          }.bind(this), true);
       return;
     } // Else: on button release.
 
     if (this.longPressTimer) {
-      engine.stopTimer(this.longPressTimer);
+      DJ202.stopTimer(this.longPressTimer);
       this.longPressTimer = null;
     }
 
@@ -736,8 +787,8 @@ DJ202.SyncButton.prototype = Object.create(components.SyncButton.prototype);
 
 DJ202.SyncButton.prototype.connect = function() {
   this.connections = [
-    engine.makeConnection(this.group, 'sync_enabled', this.output),
-    engine.makeConnection(this.group, 'quantize', this.output)
+    DJ202.makeConnection(this.group, 'sync_enabled', this.output.bind(this)),
+    DJ202.makeConnection(this.group, 'quantize', this.output.bind(this))
   ];
   this.deck = script.deckFromGroup(this.group);
   this.midi_enable = [ 0x90 + this.deck - 1, 0x02 ];
@@ -774,15 +825,15 @@ DJ202.SyncButton.prototype.unshift = function() {
       if (!syncEnabled) { // Single tap when sync disabled.
         engine.setValue(this.group, 'beatsync', 1);
         this.longPressTimer =
-            engine.beginTimer(this.longPressTimeout, function() {
+            DJ202.beginTimer(this.longPressTimeout, function() {
               engine.setValue(this.group, 'sync_enabled', 1);
               this.longPressTimer = null;
-            }, true);
+            }.bind(this), true);
         // For the next call.
         this.isDoubleTap = true;
         this.doubleTapTimer =
-            engine.beginTimer(this.doubleTapTimeout,
-                              function() { this.isDoubleTap = false }, true);
+            DJ202.beginTimer(this.doubleTapTimeout,
+                              function() { this.isDoubleTap = false }.bind(this), true);
         return
       } // Else: Sync is enabled.
 
@@ -791,7 +842,7 @@ DJ202.SyncButton.prototype.unshift = function() {
     } // Else: On button release.
 
     if (this.longPressTimer) {
-      engine.stopTimer(this.longPressTimer);
+      DJ202.stopTimer(this.longPressTimer);
       this.longPressTimer = null;
     };
 
@@ -970,14 +1021,14 @@ DJ202.SlipModeButton.prototype.input = function(channel, control, value, status,
   this.doubleTapped = true;
 
   if (this.doubleTapTimer) {
-    engine.stopTimer(this.doubleTapTimer);
+    DJ202.stopTimer(this.doubleTapTimer);
     this.doubleTapTimer = null;
   }
 
-  this.doubleTapTimer = engine.beginTimer(this.doubleTapTimeout, function() {
+  this.doubleTapTimer = DJ202.beginTimer(this.doubleTapTimeout, function() {
     this.doubleTapped = false;
     this.doubleTapTimer = null;
-  }, true);
+  }.bind(this), true);
 };
 
 DJ202.KeylockButton = function(paramButtons) {
@@ -1003,10 +1054,10 @@ DJ202.KeylockButton.prototype.unshift = function() {
     if (value) { // Button press.
 
       this.longPressTimer =
-          engine.beginTimer(this.longPressTimeout, function() {
+          DJ202.beginTimer(this.longPressTimeout, function() {
             this.paramPlusMinus.songKeyMode(true);
             this.is_held = true;
-          }, true);
+          }.bind(this), true);
 
       return;
     } // Else: Button release.
@@ -1016,7 +1067,7 @@ DJ202.KeylockButton.prototype.unshift = function() {
     this.trigger();
 
     if (this.longPressTimer) {
-      engine.stopTimer(this.longPressTimer);
+      DJ202.stopTimer(this.longPressTimer);
       this.longPressTimer = null;
     }
 
@@ -1079,7 +1130,7 @@ DJ202.ParamButtons.prototype.setLEDs = function(plusValue, minusValue) {
 DJ202.ParamButtons.prototype.connect = function() {
   components.Button.prototype.connect.call(this);
   var keyConnection =
-      engine.makeConnection(this.group, 'pitch_adjust', this.output);
+      DJ202.makeConnection(this.group, 'pitch_adjust', this.output.bind(this));
   this.connections.push(keyConnection);
 };
 
@@ -1386,12 +1437,12 @@ DJ202.PadSection.prototype.setState = function(channel, control, value, status,
     break;
   case 0x32:
     DJ202.slicerConnections[script.deckFromGroup(group)] =
-        engine.makeConnection(group, 'beat_active', DJ202.slicerBeatCounter);
+        DJ202.makeConnection(group, 'beat_active', DJ202.slicerBeatCounter);
     this.mode = DJ202.PadMode.SLICERLOOP;
     break;
   case 0x31:
     DJ202.slicerConnections[script.deckFromGroup(group)] =
-        engine.makeConnection(group, 'beat_active', DJ202.slicerBeatCounter);
+        DJ202.makeConnection(group, 'beat_active', DJ202.slicerBeatCounter);
     this.mode = DJ202.PadMode.SLICER;
     break;
   };

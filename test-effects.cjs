@@ -9,7 +9,7 @@ const end = source.indexOf('DJ202.EffectUnit.prototype =', start);
 let focus = 0;
 let writes = [];
 const context = {
-  DJ202: { EffectButton: function() {}, EffectModeButton: function() {} },
+  DJ202: { EffectButton: function() {}, EffectModeButton: function() {}, makeConnection() {} },
   components: {
     ComponentContainer: function() {},
     Pot: function(options) { Object.assign(this, options); this.unshift(); }
